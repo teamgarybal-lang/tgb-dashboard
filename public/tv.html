@@ -1,5 +1,10 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Team board · Harcourts TGB Group</title><meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="apple-mobile-web-app-title" content="TGB Dashboard">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
 :root{--blue:#00ADEF;--navy:#071630;--panel:#10284C;--line:rgba(255,255,255,.08);--mut:#9BB0CC;
  --c-appr_done:#F5C451;--c-appr_booked:#B79CFF;--c-cold_calls:#5FD3FF;--c-door_knocks:#FF8A6A;--c-letter_drops:#5EE0A0}
@@ -69,5 +74,6 @@ async function load(){try{
  document.getElementById('err').textContent='';
 }catch(e){document.getElementById('err').textContent='Reconnecting…'}}
 tick();setInterval(tick,10000);load();setInterval(load,12000);
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 setTimeout(()=>location.reload(),6*3600e3);
 </script></body></html>

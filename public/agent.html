@@ -1,9 +1,25 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My numbers · Harcourts TGB Group</title><link rel="stylesheet" href="/static/app.css"><meta name="theme-color" content="#0B1F3A"></head>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>My numbers · Harcourts TGB Group</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TGB Dashboard">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/app.css"></head>
 <body>
 <header class="top"><img src="/static/logo.png" alt="Harcourts TGB Group"><div class="who"><b id="nm"></b><br><span id="wk"></span></div></header>
 <div class="wrap">
  <div id="pwb" class="banner" style="display:none">You're using a temporary password. <a href="#" onclick="changePw();return false">Set your own password</a>.</div>
+ <div id="install" class="hint" style="display:none">
+  <div class="row" style="justify-content:space-between;align-items:flex-start">
+   <div><b>Add this to your home screen</b><p class="muted" style="margin:6px 0 0">iPhone: tap Share, then Add to Home Screen. Android: open the browser menu, then Install app or Add to Home screen. It then opens like an app and stays signed in.</p></div>
+   <button type="button" class="sec small" id="installDismiss">Not now</button>
+  </div>
+ </div>
  <div class="card">
   <div class="row" style="justify-content:space-between"><h2 id="dayTitle" style="margin:0">Today</h2></div>
   <select id="day" style="margin-top:8px"></select>
@@ -80,4 +96,5 @@ $('#pipeCancel').onclick=resetPipe;
 $('#pipeForm').onsubmit=async ev=>{ev.preventDefault();$('#perr').textContent='';const body={address:$('#paddr').value,stage:$('#pstage').value,notes:$('#pnotes').value};const id=editingPipe;try{if(id)await api('/api/me/pipeline/'+id,{body});else await api('/api/me/pipeline',{body});resetPipe();$('#pmsg').textContent=id?'Address updated':'Address added';setTimeout(()=>$('#pmsg').textContent='',2500);await loadPipeline();loadTeam()}catch(e){$('#perr').textContent=e.message}};
 async function removePipe(id){if(!confirm('Remove this address from your pipeline?'))return;$('#perr').textContent='';try{await api('/api/me/pipeline/'+id+'/delete',{body:{}});if(editingPipe===id)resetPipe();$('#pmsg').textContent='Address removed';setTimeout(()=>$('#pmsg').textContent='',2500);await loadPipeline();loadTeam()}catch(e){$('#perr').textContent=e.message}}
 load();setInterval(loadTeam,60000);
+(function(){const box=$('#install');const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;if(!box||standalone||localStorage.getItem('tgb-install-hint')==='off')return;box.style.display='block';$('#installDismiss').onclick=()=>{localStorage.setItem('tgb-install-hint','off');box.style.display='none'}})();
 </script></body></html>

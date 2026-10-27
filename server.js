@@ -554,6 +554,16 @@ app.get('/api/admin/pipeline.csv', requireAdmin, (req, res) => {
 
 // --- pages ---
 const page = f => (req, res) => res.sendFile(path.join(__dirname, 'public', f));
+app.get('/manifest.webmanifest', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/manifest+json');
+  res.sendFile(path.join(__dirname, 'public', 'manifest.webmanifest'));
+});
+app.get('/sw.js', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/javascript');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
 app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); res.redirect(u.role === 'admin' ? '/admin' : '/me'); });
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));

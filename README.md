@@ -2,7 +2,8 @@
 
 Node.js (Express) + SQLite (`data.db`). Port 3100. Run under pm2 as `tgb-dashboard` (`ecosystem.config.js`).
 
-- `/login` – agents and admin sign in (email + password, 180-day session cookie, bcrypt-hashed passwords)
+- `/login` – agents and admin sign in (email + password, 180-day session cookie, bcrypt-hashed passwords). The same cookie keeps you signed in when the site is opened from the phone home screen.
+- Installable phone app: `/manifest.webmanifest` (name Harcourts TGB Group Dashboard) and `/sw.js`. Opening the installed app loads `/`, which sends you to sign-in or your page. The service worker caches files under `/static` only. Bump `CACHE` in `sw.js` when those files change. It never caches `/api` or the signed-in pages, so the numbers stay live.
 - `/me` – agent phone view: daily +1 totals for today (or any of the last 14 days), this week's day-by-day own totals, this week's and this month's own totals, team progress, their own pipeline addresses, weekly history
 - `/admin` – Gary: per-agent weekly and monthly totals, daily team totals for the week, leaderboard, day-by-day history, every agent's pipeline addresses, CSV for daily rows, weekly and monthly rollups, and pipeline addresses, add/reset/deactivate/delete agents, weekly targets, TV key
 - `/tv?key=...` – office TV board for this week (totals, daily breakdown, leaderboard, pipeline count), no login, refreshes every 12 s. Key is regenerated from /admin. The TV never shows property addresses.
