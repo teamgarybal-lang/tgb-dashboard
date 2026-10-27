@@ -55,7 +55,7 @@ tr.s-appr_done td:first-child{box-shadow:inset 4px 0 0 var(--c-appr_done)}tr.s-a
 .banner{background:#FFF7ED;border:1px solid #FED7AA;color:#9A3412;padding:12px 14px;border-radius:12px;margin-bottom:14px;font-size:14px}
 .hint{background:#E7F6FD;border:1px solid #B6E6F8;color:var(--navy);padding:12px 14px;border-radius:12px;margin-bottom:14px;font-size:14px}
 .qotd{border-left:5px solid var(--blue)}
-.tvcode{font-size:42px;font-weight:800;letter-spacing:.24em;color:var(--navy);margin:6px 0 12px}
+.tvlink{font-size:22px;font-weight:800;color:var(--navy);margin:6px 0 12px;word-break:break-all}
 .qotd p{margin:0;font-size:22px;line-height:1.4;font-style:italic;font-weight:650;color:var(--navy)}
 .qotd .by{margin-top:8px;font-weight:800;color:#0788bd}
 .rank{display:grid;grid-template-columns:42px 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-radius:14px;margin-bottom:8px;background:#F4F7FB;border:1px solid var(--line)}
