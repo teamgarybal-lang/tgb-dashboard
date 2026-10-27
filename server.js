@@ -62,7 +62,21 @@ const LABELS = { appr_done: 'Appraisals done', appr_booked: 'Appraisals booked',
 const DEFAULT_TARGETS = { appr_done: 30, appr_booked: 40, cold_calls: 1500, door_knocks: 1000, letter_drops: 500 };
 const getSetting = k => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? r.value : null; };
 const setSetting = (k, v) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, v);
-if (!getSetting('tv_key')) setSetting('tv_key', crypto.randomBytes(12).toString('base64url'));
+const TV_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o or 1/l/i
+const TV_CODE_RE = /^[abcdefghjkmnpqrstuvwxyz23456789]{6}$/;
+function newTvCode() {
+  let s = '';
+  while (s.length < 6) {
+    const b = crypto.randomBytes(1)[0];
+    if (b < TV_ALPHABET.length * 8) s += TV_ALPHABET[b % TV_ALPHABET.length];
+  }
+  return s;
+}
+const currentTv = getSetting('tv_key');
+if (!currentTv || !TV_CODE_RE.test(currentTv)) {
+  if (currentTv) console.log('Replacing the long TV link with a 6-character code. The old link no longer works.');
+  setSetting('tv_key', newTvCode());
+}
 if (!getSetting('targets')) setSetting('targets', JSON.stringify(DEFAULT_TARGETS));
 else {
   const t = JSON.parse(getSetting('targets'));
@@ -521,9 +535,46 @@ app.post('/api/me/pipeline/:id/delete', requireUser, (req, res) => {
   res.json({ ok: true });
 });
 
-// --- TV (token) ---
+// --- TV (short code) ---
+const tvFails = new Map();
+function tvBlocked(ip) {
+  const now = Date.now();
+  const a = (tvFails.get(ip) || []).filter(t => now - t < 10 * 60e3);
+  tvFails.set(ip, a);
+  return a.length >= 10;
+}
+function tvNoteFail(ip) {
+  const now = Date.now();
+  const a = (tvFails.get(ip) || []).filter(t => now - t < 10 * 60e3);
+  a.push(now);
+  tvFails.set(ip, a);
+}
+function tvCodeOk(raw) {
+  const code = String(raw || '').trim().toLowerCase();
+  return !!code && code === getSetting('tv_key');
+}
+function setTvCookie(req, res) {
+  res.cookie('tv', getSetting('tv_key'), { httpOnly: true, sameSite: 'lax', secure: !!req.secure, maxAge: 365 * 864e5, path: '/' });
+}
+function tvCodePage(msg) {
+  const note = msg ? `<p class="err">${msg}</p>` : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TV code · Harcourts TGB Group</title>
+<style>html,body{margin:0;height:100%;background:#071630;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}.box{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center}h1{font-size:42px;font-weight:800;letter-spacing:-.03em;margin:0 0 12px}p.lead{color:#9BB0CC;font-size:22px;margin:0 0 28px}input{font-family:inherit;font-size:64px;font-weight:800;line-height:1;letter-spacing:.28em;text-align:center;text-transform:lowercase;width:min(640px,92vw);padding:22px 12px;border-radius:18px;border:3px solid #00ADEF;background:#0B1F3A;color:#fff}button{margin-top:22px;font-size:28px;font-weight:800;padding:18px 48px;border:0;border-radius:16px;background:#00ADEF;color:#071630}p.err{color:#FCA5A5;font-size:24px;margin:22px 0 0}</style></head>
+<body><form class="box" method="get" action="/tv"><h1>Harcourts <span style="color:#00ADEF;font-weight:300">TGB Group</span></h1><p class="lead">Type the 6-character TV code</p><input name="key" maxlength="6" autocapitalize="none" autocomplete="off" spellcheck="false" autofocus inputmode="text" aria-label="TV code"><button type="submit">Open the board</button>${note}</form></body></html>`;
+}
+function tvReject(req, res, json) {
+  if (tvBlocked(req.ip)) {
+    if (json) return res.status(429).json({ error: 'Too many attempts. Try again in 10 minutes.' });
+    return res.status(429).type('html').send(tvCodePage('Too many tries. Wait 10 minutes.'));
+  }
+  tvNoteFail(req.ip);
+  if (json) return res.status(403).json({ error: 'Bad key' });
+  return res.status(403).type('html').send(tvCodePage('That code is not right.'));
+}
 app.get('/api/tv', (req, res) => {
-  if (!req.query.key || req.query.key !== getSetting('tv_key')) return res.status(403).json({ error: 'Bad key' });
+  const given = req.query.key != null && String(req.query.key) !== '' ? String(req.query.key).trim().toLowerCase() : '';
+  const ok = given ? given === getSetting('tv_key') : req.cookies.tv === getSetting('tv_key');
+  if (!ok) return given ? tvReject(req, res, true) : res.status(403).json({ error: 'Bad key' });
   const t = teamData(thisWeek());
   const md = monthData(monthOf(t.today));
   const scaled = monthTargetsFromWeekly(md.month, t.targets);
@@ -584,7 +635,7 @@ app.get('/api/admin/agent/:id/history', requireAdmin, (req, res) => res.json(db.
 app.post('/api/admin/targets', requireAdmin, (req, res) => {
   const t = {}; METRICS.forEach(m => t[m] = Math.max(0, parseInt((req.body || {})[m], 10) || 0)); setSetting('targets', JSON.stringify(t)); res.json({ ok: true, targets: t });
 });
-app.post('/api/admin/tvkey', requireAdmin, (req, res) => { const k = crypto.randomBytes(12).toString('base64url'); setSetting('tv_key', k); res.json({ ok: true, tv_key: k }); });
+app.post('/api/admin/tvkey', requireAdmin, (req, res) => { const k = newTvCode(); setSetting('tv_key', k); res.json({ ok: true, tv_key: k }); });
 function csvEsc(v) { v = v == null ? '' : String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function sendCsv(res, filename, head, rows) {
   const csv = [head.join(','), ...rows.map(r => head.map(h => csvEsc(r[h])).join(','))].join('\n');
@@ -670,7 +721,18 @@ app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));
 app.get('/admin', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); if (u.role !== 'admin') return res.redirect('/me'); page('admin.html')(req, res); });
-app.get('/tv', page('tv.html'));
+app.get('/tv', (req, res) => {
+  if (req.query.key != null && String(req.query.key) !== '') {
+    if (tvCodeOk(req.query.key)) { setTvCookie(req, res); return res.redirect('/tv'); }
+    return tvReject(req, res, false);
+  }
+  if (req.cookies.tv === getSetting('tv_key')) return page('tv.html')(req, res);
+  res.type('html').send(tvCodePage(''));
+});
+app.get('/tv/:code', (req, res) => {
+  if (tvCodeOk(req.params.code)) { setTvCookie(req, res); return res.redirect('/tv'); }
+  return tvReject(req, res, false);
+});
 app.use('/static', express.static(path.join(__dirname, 'public', 'static'), { maxAge: '1h' }));
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 

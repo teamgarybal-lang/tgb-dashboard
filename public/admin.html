@@ -45,8 +45,9 @@
  <div class="card"><h2>Weekly team targets</h2><p class="muted">Used for the progress bars on the TV and agent screens. They apply to weekly totals only. Letter / flyer drops starts at 500 until you change it.</p>
   <div id="targets" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
   <button style="margin-top:12px" onclick="saveTargets()">Save targets</button><span class="okmsg" id="tOk" style="margin-left:10px"></span></div>
- <div class="card"><h2>Office TV screen</h2><p class="muted">Open this link on the office TV. It needs no login. Anyone with the link can see the TV screen, so regenerate the key if it gets shared.</p>
-  <input id="tvurl" readonly onclick="this.select()"><div class="row" style="margin-top:10px"><a class="btn" id="tvopen" target="_blank">Open TV view</a><button class="danger" onclick="regen()">Regenerate key</button></div></div>
+ <div class="card" id="tvCard"><h2>Office TV screen</h2><p class="muted">Open this link on the office TV, or type the code with the remote. It needs no login. A new code stops the old link and the TV will ask again.</p>
+  <div class="tvcode" id="tvcode"></div>
+  <input id="tvurl" readonly onclick="this.select()"><div class="row" style="margin-top:10px"><a class="btn" id="tvopen" target="_blank">Open TV view</a><button class="danger" onclick="regen()">New TV code</button></div></div>
 </div>
 <script src="/static/common.js"></script>
 <script>
@@ -77,7 +78,7 @@ async function load(){const q=new URLSearchParams({view:curView});if(curPeriod)q
   $('#lb').innerHTML=lb.length?lb.map((r,i)=>`<div class="rank ${medal[i]||''}"><div class="rk">${i+1}</div><div><b>${esc(r.name)}</b><div class="muted">${r.appr_done} done · ${r.appr_booked} booked · ${r.cold_calls} calls · ${r.door_knocks} knocks · ${r.letter_drops} drops</div></div><div class="sc">${r.score}</div></div>`).join(''):'<p class="muted">No numbers in yet this week.</p>';}
  loadPipeline();
  $('#targets').innerHTML=M.map(m=>`<div><label>${L[m]}</label><input type="number" min="0" id="t_${m}" value="${D.targets[m]}"></div>`).join('');
- const u=`${location.origin}/tv?key=${D.tv_key}`;$('#tvurl').value=u;$('#tvopen').href=u;
+ const u=`${location.origin}/tv/${D.tv_key}`;$('#tvcode').textContent=D.tv_key;$('#tvurl').value=u;$('#tvopen').href=u;
  loadUsers()}
 async function loadPipeline(){const users=await api('/api/admin/users');const agents=users.filter(u=>u.role==='agent');const cur=$('#pipeAgent').value;
  $('#pipeAgent').innerHTML='<option value="">All agents</option>'+agents.map(a=>`<option value="${a.id}">${esc(a.name)}${a.active?'':' (inactive)'}</option>`).join('');
@@ -95,7 +96,7 @@ async function resetPw(id){const pw=prompt('New temporary password (6+ character
 async function setActive(id,a){await api(`/api/admin/users/${id}/active`,{body:{active:!!a}});load()}
 async function del(id,n){if(!confirm(`Delete ${n} and all their numbers? This can't be undone. (Deactivate keeps their history.)`))return;await api(`/api/admin/users/${id}`,{method:'DELETE'});load()}
 async function saveTargets(){const b={};M.forEach(m=>b[m]=$('#t_'+m).value);await api('/api/admin/targets',{body:b});$('#tOk').textContent='Saved';setTimeout(()=>$('#tOk').textContent='',2000);load()}
-async function regen(){if(!confirm('Make a new TV key? The old TV link will stop working.'))return;await api('/api/admin/tvkey',{body:{}});load()}
+async function regen(){if(!confirm('Make a new TV code? The old link will stop working and the office TV will need the new code.'))return;await api('/api/admin/tvkey',{body:{}});load()}
 async function hist(id,n){const h=await api(`/api/admin/agent/${id}/history`);$('#histTitle').textContent=n+' – daily history';histCard.style.display='block';
  const fmt=d=>new Date(d+'T00:00:00').toLocaleDateString('en-NZ',{weekday:'short',day:'numeric',month:'short'});
  $('#histTbl').innerHTML=`<tr><th>Day</th>${M.map(m=>`<th class="n">${D.labels[m]}</th>`).join('')}</tr>`+(h.length?h.map(r=>`<tr><td>${esc(fmt(r.day))}</td>${M.map(m=>`<td class="n">${r[m]||0}</td>`).join('')}</tr>`).join(''):'<tr><td class="muted" colspan="6">No daily numbers yet</td></tr>');histCard.scrollIntoView({behavior:'smooth'})}

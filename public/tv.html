@@ -64,8 +64,8 @@ const DOW=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function tick(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-NZ',{timeZone:'Pacific/Auckland',hour:'numeric',minute:'2-digit'})}
 async function load(){try{
- const r=await fetch('/api/tv?key='+encodeURIComponent(key),{cache:'no-store'});
- if(r.status===403){document.body.innerHTML='<div style="padding:18vh 8vw;text-align:center;font-size:42px">This TV link has expired or is wrong.<br><span style="color:#9BB0CC;font-size:24px">Open the TV link from the admin page.</span></div>';return}
+ const r=await fetch('/api/tv'+(key?'?key='+encodeURIComponent(key):''),{cache:'no-store'});
+ if(r.status===403||r.status===429){location.replace('/tv');return}
  const d=await r.json();const f=x=>new Date(x+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short'});
  document.getElementById('wk').textContent=`Week ${f(d.week)} – ${f(d.week_end)}`;
  const rows=(totals,targets)=>M.map(m=>{const tg=targets[m]||0,v=totals[m]||0,p=tg?Math.min(100,v/tg*100):0;return `<div class="m c-${m}"><div class="lab"><span class="name">${esc(d.labels[m])}</span><span><span class="v">${v}</span>${tg?`<span class="t"> / ${tg}</span>`:''}</span></div>${tg?`<div class="bar"><i style="width:${p}%"></i></div>`:''}</div>`}).join('');
