@@ -335,7 +335,7 @@ function auth(req) {
   return u;
 }
 const requireUser = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); req.user = u; next(); };
-const requireAdmin = (req, res, next) => { const u = auth(req); if (!u || u.role !== 'admin') return res.status(403).json({ error: 'Admin only' }); req.user = u; next(); };
+const requireAdmin = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); if (u.role !== 'admin') return res.status(403).json({ error: 'Admin only' }); req.user = u; next(); };
 // Basic CSRF guard: state-changing API calls must be JSON (forms from other sites can't send that cross-origin without CORS)
 app.use('/api', (req, res, next) => { if (req.method === 'POST' && !req.is('application/json')) return res.status(415).json({ error: 'JSON required' }); next(); });
 
