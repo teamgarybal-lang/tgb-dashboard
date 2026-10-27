@@ -23,12 +23,19 @@
  </div>
  <div class="card">
   <h2>Future pipeline</h2>
-  <label for="pc">Listings expected in the next 30–90 days</label>
-  <input id="pc" type="number" min="0" inputmode="numeric">
-  <label for="pn">Short note</label>
-  <textarea id="pn" rows="2" maxlength="300" placeholder="e.g. 2 in Papakura, 1 Rosehill pre-approved"></textarea>
-  <button id="savePipe" style="width:100%;margin-top:10px">Save pipeline</button>
-  <div class="okmsg" id="pmsg"></div>
+  <p class="muted">Add each property you expect in the next 30–90 days. Only you and admin can see the addresses.</p>
+  <p class="muted" id="pipeCount"></p>
+  <div id="pipeList"></div>
+  <form id="pipeForm">
+   <label for="paddr">Property address</label>
+   <input id="paddr" maxlength="200" required placeholder="e.g. 12 Great South Road, Papakura" autocomplete="off">
+   <label for="pstage">Stage</label>
+   <select id="pstage"><option value="">Stage (optional)</option></select>
+   <label for="pnotes">Notes</label>
+   <textarea id="pnotes" rows="2" maxlength="300" placeholder="e.g. Pre-approved, vendor wants to list in November"></textarea>
+   <div class="row" style="margin-top:10px"><button type="submit" id="pipeSave">Add to pipeline</button><button type="button" class="sec" id="pipeCancel" style="display:none">Cancel</button></div>
+  </form>
+  <div class="okmsg" id="pmsg"></div><div class="err" id="perr"></div>
  </div>
  <div class="card">
   <h2>Team this week</h2>
@@ -50,16 +57,29 @@ function renderMetrics(e){$('#metrics').innerHTML=M.map(m=>`<div class="metric">
 function setFlag(on){const f=$('#flag');if(!f)return;f.className='pill '+(on?'on':'off');f.textContent=on?'Working today ✓':'Not checked in today'}
 function renderMine(d){$('#rollNote').textContent=`Week ${fmtWeek(d.week.week,d.week.week_end)} · ${fmtMonth(d.month.month)}`;
  $('#mine').innerHTML='<tr><th>Metric</th><th class="n">This week</th><th class="n">This month</th></tr>'+M.map(m=>`<tr><td>${esc(L[m])}</td><td class="n">${d.week[m]||0}</td><td class="n">${d.month[m]||0}</td></tr>`).join('')}
-function renderTeam(t){$('#inCount').textContent=`Entered this week: ${t.entered_count}/${t.agent_count} agents · Pipeline: ${t.totals.pipeline_count} listings`;
+function renderTeam(t){$('#inCount').textContent=`Entered this week: ${t.entered_count}/${t.agent_count} agents · Pipeline: ${t.totals.pipeline_count} addresses`;
  $('#team').innerHTML=M.map(m=>{const tg=t.targets[m]||0,v=t.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div style="margin:10px 0"><div class="row" style="justify-content:space-between"><span>${L[m]}</span><b>${v}${tg?' / '+tg:''}</b></div><div class="bar"><i style="width:${p}%"></i></div></div>`}).join('')}
 async function loadTeam(){const d=await api('/api/me'+(currentDay?'?day='+encodeURIComponent(currentDay):''));renderTeam(d.team);renderMine(d)}
 async function load(){const d=await api('/api/me'+(currentDay?'?day='+encodeURIComponent(currentDay):''));L=d.labels;today=d.today;currentDay=d.day;$('#nm').textContent=d.user.name;$('#wk').textContent='Week '+fmtWeek(d.team.week,d.team.week_end);
  $('#dayTitle').textContent=d.day===d.today?'Today':fmtDay(d.day);
  $('#day').innerHTML=d.recent_days.map(day=>`<option value="${day}" ${day===d.day?'selected':''}>${day===d.today?'Today · ':''}${fmtDay(day)}</option>`).join('');
- if(d.user.must_change)$('#pwb').style.display='block';renderMetrics(d.entry);setFlag(!!d.entry.working_today);renderMine(d);$('#status').value=d.entry.status||'';$('#pc').value=d.entry.pipeline_count;$('#pn').value=d.entry.pipeline_note||'';renderTeam(d.team);
+ if(d.user.must_change)$('#pwb').style.display='block';renderMetrics(d.entry);setFlag(!!d.entry.working_today);renderMine(d);$('#status').value=d.entry.status||'';renderTeam(d.team);loadPipeline();
  const h=await api('/api/me/history');$('#hist').innerHTML='<tr><th>Week</th><th class="n">Done</th><th class="n">Booked</th><th class="n">Calls</th><th class="n">Knocks</th><th class="n">Drops</th></tr>'+h.map(r=>`<tr><td>${esc(r.week_start)}</td>${M.map(m=>`<td class="n">${r[m]}</td>`).join('')}</tr>`).join('')}
 $('#day').onchange=e=>{currentDay=e.target.value;load()};
 $('#saveStatus').onclick=async()=>{await api('/api/me/entry',{body:{status:$('#status').value}});setFlag(true);$('#stmsg').textContent='Status updated';setTimeout(()=>$('#stmsg').textContent='',2500)};
-$('#savePipe').onclick=async()=>{await api('/api/me/entry',{body:{pipeline_count:$('#pc').value,pipeline_note:$('#pn').value}});setFlag(true);$('#pmsg').textContent='Pipeline saved';setTimeout(()=>$('#pmsg').textContent='',2500);loadTeam()};
+let editingPipe=null;
+function renderPipeline(d){const entries=d.entries||[];const stages=d.stages||[];const cur=$('#pstage').value;
+ $('#pstage').innerHTML='<option value="">Stage (optional)</option>'+stages.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+ $('#pstage').value=stages.includes(cur)?cur:'';
+ $('#pipeCount').textContent=entries.length===1?'1 address':entries.length+' addresses';
+ $('#pipeList').innerHTML=entries.length?entries.map(e=>`<div class="metric"><div><div class="name">${esc(e.address)}</div><div class="sub">${esc(e.stage||'No stage')}${e.notes?' · '+esc(e.notes):''}</div></div><div class="row"><button type="button" class="sec small" data-edit="${e.id}">Edit</button><button type="button" class="danger small" data-del="${e.id}">Remove</button></div></div>`).join(''):'<p class="muted">No addresses yet.</p>';
+ $('#pipeList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>startPipe(entries.find(e=>e.id===+b.dataset.edit)));
+ $('#pipeList').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>removePipe(+b.dataset.del))}
+function startPipe(e){editingPipe=e.id;$('#paddr').value=e.address;$('#pstage').value=e.stage||'';$('#pnotes').value=e.notes||'';$('#pipeSave').textContent='Save changes';$('#pipeCancel').style.display='inline-block';$('#paddr').focus()}
+function resetPipe(){editingPipe=null;$('#pipeForm').reset();$('#pipeSave').textContent='Add to pipeline';$('#pipeCancel').style.display='none'}
+async function loadPipeline(){renderPipeline(await api('/api/me/pipeline'))}
+$('#pipeCancel').onclick=resetPipe;
+$('#pipeForm').onsubmit=async ev=>{ev.preventDefault();$('#perr').textContent='';const body={address:$('#paddr').value,stage:$('#pstage').value,notes:$('#pnotes').value};const id=editingPipe;try{if(id)await api('/api/me/pipeline/'+id,{body});else await api('/api/me/pipeline',{body});resetPipe();$('#pmsg').textContent=id?'Address updated':'Address added';setTimeout(()=>$('#pmsg').textContent='',2500);await loadPipeline();loadTeam()}catch(e){$('#perr').textContent=e.message}};
+async function removePipe(id){if(!confirm('Remove this address from your pipeline?'))return;$('#perr').textContent='';try{await api('/api/me/pipeline/'+id+'/delete',{body:{}});if(editingPipe===id)resetPipe();$('#pmsg').textContent='Address removed';setTimeout(()=>$('#pmsg').textContent='',2500);await loadPipeline();loadTeam()}catch(e){$('#perr').textContent=e.message}}
 load();setInterval(loadTeam,60000);
 </script></body></html>

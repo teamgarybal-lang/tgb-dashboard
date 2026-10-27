@@ -3,10 +3,10 @@
 Node.js (Express) + SQLite (`data.db`). Port 3100. Run under pm2 as `tgb-dashboard` (`ecosystem.config.js`).
 
 - `/login` – agents and admin sign in (email + password, 180-day session cookie, bcrypt-hashed passwords)
-- `/me` – agent phone view: daily +1 totals for today (or any of the last 14 days), this week's and this month's own totals, team progress, today status, pipeline, weekly history
-- `/admin` – Gary: per-agent weekly and monthly totals, day-by-day history, CSV for daily rows plus weekly and monthly rollups, add/reset/deactivate/delete agents, weekly targets, TV key
-- `/tv?key=...` – office TV board for this week (totals, leaderboard, pipeline, who has entered), no login, refreshes every 12 s. Key is regenerated from /admin.
-- Daily metrics, in order: appraisals done, appraisals booked, cold calls, door knocks, letter / flyer drops. Weeks run Monday–Sunday and months are calendar months, both in Pacific/Auckland. Weekly totals feed the weekly targets. The month view shows totals only, with no scaled targets. Pipeline still carries forward into a new week until updated.
+- `/me` – agent phone view: daily +1 totals for today (or any of the last 14 days), this week's and this month's own totals, team progress, today status, their own pipeline addresses, weekly history
+- `/admin` – Gary: per-agent weekly and monthly totals, day-by-day history, every agent's pipeline addresses, CSV for daily rows, weekly and monthly rollups, and pipeline addresses, add/reset/deactivate/delete agents, weekly targets, TV key
+- `/tv?key=...` – office TV board for this week (totals, leaderboard, pipeline count, who has entered), no login, refreshes every 12 s. Key is regenerated from /admin. The TV never shows property addresses.
+- Daily metrics, in order: appraisals done, appraisals booked, cold calls, door knocks, letter / flyer drops. Weeks run Monday–Sunday and months are calendar months, both in Pacific/Auckland. Weekly totals feed the weekly targets. The month view shows totals only, with no scaled targets. Pipeline is a list of addresses per agent. The team and TV show how many addresses, not the addresses. Older weekly pipeline counts stay on the weekly CSV.
 - Leaderboard score = appraisals done × 30 + appraisals booked × 20 + cold calls + door knocks + letter / flyer drops.
 - "Numbers in" / missing list means the agent logged a number above zero on any day in that week (on the TV and week view) or month (on the month view). "Working today" is still a separate check-in for today.
 - Admin temporary password: `ADMIN_PASSWORD.txt` (change it after first sign-in).

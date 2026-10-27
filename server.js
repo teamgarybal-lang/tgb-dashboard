@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS weekly_metric_migration(
   week_start TEXT NOT NULL,
   PRIMARY KEY(user_id, week_start));
 CREATE INDEX IF NOT EXISTS day_entries_day ON day_entries(day);
+CREATE TABLE IF NOT EXISTS pipeline_entries(
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  address TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  stage TEXT NOT NULL DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS pipeline_legacy_migration(
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE);
+CREATE INDEX IF NOT EXISTS pipeline_entries_user ON pipeline_entries(user_id);
 `);
 
 // Entry order on every screen. Score = appr_done*30 + appr_booked*20 + cold_calls + door_knocks + letter_drops.
@@ -88,6 +99,52 @@ function migrateWeeklyMetrics() {
   })(pending);
 }
 migrateWeeklyMetrics();
+
+// Stages match the old "expected in 30–90 days" note. Blank is allowed.
+const PIPELINE_STAGES = ['', 'Expected', 'Appraisal booked', 'Pre-approved', 'Under offer'];
+function cleanAddress(v) {
+  const s = String(v ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').trim().replace(/\s+/g, ' ');
+  return s ? s.slice(0, 200) : null;
+}
+function cleanNotes(v) {
+  return String(v ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, 300);
+}
+function cleanStage(v) {
+  const s = String(v ?? '').trim();
+  return PIPELINE_STAGES.includes(s) ? s : null;
+}
+
+// Turn the carried-forward weekly pipeline figure into address rows, once per user.
+// The latest entries row wins. A note becomes the address. A count with no note becomes one
+// row that records the number. Older weekly snapshots stay on entries and are not copied again.
+function migratePipelineEntries() {
+  const users = db.prepare('SELECT id FROM users').all();
+  const marked = db.prepare('SELECT 1 AS n FROM pipeline_legacy_migration WHERE user_id=?');
+  const hasRows = db.prepare('SELECT 1 AS n FROM pipeline_entries WHERE user_id=? LIMIT 1');
+  const latest = db.prepare('SELECT pipeline_count, pipeline_note FROM entries WHERE user_id=? ORDER BY week_start DESC LIMIT 1');
+  const insert = db.prepare(`INSERT INTO pipeline_entries(user_id,address,notes,stage,created_at,updated_at)
+    VALUES(?,?,?,'',datetime('now'),datetime('now'))`);
+  const mark = db.prepare('INSERT INTO pipeline_legacy_migration(user_id) VALUES(?)');
+  db.transaction(list => {
+    for (const u of list) {
+      if (marked.get(u.id)) continue;
+      if (!hasRows.get(u.id)) {
+        const e = latest.get(u.id);
+        const note = String((e && e.pipeline_note) || '').trim().replace(/\s+/g, ' ');
+        const count = e ? (e.pipeline_count || 0) : 0;
+        if (note) {
+          const rest = note.slice(200).trim();
+          const countLine = count > 0 ? `Previously recorded as ${count} expected listings.` : '';
+          insert.run(u.id, note.slice(0, 200), [rest, countLine].filter(Boolean).join(' ').slice(0, 300));
+        } else if (count > 0) {
+          insert.run(u.id, `Recorded count only: ${count} listings (no address was saved)`.slice(0, 200), '');
+        }
+      }
+      mark.run(u.id);
+    }
+  })(users);
+}
+migratePipelineEntries();
 
 // ---- NZ date helpers ----
 function nzDay(d = new Date()) { // YYYY-MM-DD in NZ
@@ -138,8 +195,8 @@ function recentDays(today = nzDay()) {
 function ensureEntry(uid, week) {
   let e = db.prepare('SELECT * FROM entries WHERE user_id=? AND week_start=?').get(uid, week);
   if (!e) {
-    const prev = db.prepare('SELECT pipeline_count, pipeline_note FROM entries WHERE user_id=? AND week_start<? ORDER BY week_start DESC LIMIT 1').get(uid, week);
-    db.prepare('INSERT INTO entries(user_id,week_start,pipeline_count,pipeline_note) VALUES(?,?,?,?)').run(uid, week, prev ? prev.pipeline_count : 0, prev ? prev.pipeline_note : '');
+    // Pipeline addresses live in pipeline_entries, so a new week does not copy the old count or note.
+    db.prepare('INSERT INTO entries(user_id,week_start) VALUES(?,?)').run(uid, week);
     e = db.prepare('SELECT * FROM entries WHERE user_id=? AND week_start=?').get(uid, week);
   }
   return e;
@@ -207,16 +264,20 @@ function listMonths() {
   const months = db.prepare("SELECT DISTINCT substr(day,1,7) AS m FROM day_entries").all().map(r => r.m);
   return [...new Set([...months, monthOf(nzDay())])].sort().reverse().slice(0, 36);
 }
+function pipelineCountMap() {
+  return Object.fromEntries(db.prepare('SELECT user_id, COUNT(*) AS n FROM pipeline_entries GROUP BY user_id').all().map(r => [r.user_id, r.n]));
+}
 function teamData(week) {
   const today = nzDay(); const cur = thisWeek();
   const from = week, to = addDays(week, 6);
+  const pipes = pipelineCountMap();
   const agents = db.prepare("SELECT id,name FROM users WHERE role='agent' AND active=1 ORDER BY name").all();
   const rows = agents.map(a => {
     const sums = sumMetrics(a.id, from, to);
-    const e = db.prepare('SELECT pipeline_count, pipeline_note, status, status_day, last_day, updated_at FROM entries WHERE user_id=? AND week_start=?').get(a.id, week) || {};
+    const e = db.prepare('SELECT status, status_day, last_day, updated_at FROM entries WHERE user_id=? AND week_start=?').get(a.id, week) || {};
     const r = { id: a.id, name: a.name, entered: enteredMetrics(sums) };
     Object.assign(r, sums);
-    r.pipeline_count = e.pipeline_count || 0; r.pipeline_note = e.pipeline_note || '';
+    r.pipeline_count = pipes[a.id] || 0;
     r.working_today = week === cur && e.last_day === today;
     r.status = (week === cur && e.status_day === today) ? (e.status || '') : '';
     r.updated_at = e.updated_at || null;
@@ -273,7 +334,7 @@ app.get('/api/me', requireUser, (req, res) => {
   const entry = dayRow(req.user.id, day);
   res.json({
     user: req.user, today, day, recent_days: recentDays(today),
-    entry: { ...entry, status: e.status_day === today ? e.status : '', working_today: e.last_day === today, pipeline_count: e.pipeline_count, pipeline_note: e.pipeline_note || '' },
+    entry: { ...entry, status: e.status_day === today ? e.status : '', working_today: e.last_day === today },
     week: { week: w, week_end: addDays(w, 6), ...sumMetrics(req.user.id, w, addDays(w, 6)) },
     month: { month, ...sumMetrics(req.user.id, month + '-01', monthEnd(month)) },
     team: { totals: t.totals, targets: t.targets, entered_count: t.entered_count, agent_count: t.agent_count, week: w, week_end: t.week_end },
@@ -294,7 +355,7 @@ app.post('/api/me/entry', requireUser, (req, res) => {
   const metricPatch = {};
   for (const m of METRICS) if (b[m] !== undefined) metricPatch[m] = Math.max(0, Math.min(100000, parseInt(b[m], 10) || 0));
   const hasMetrics = Object.keys(metricPatch).length > 0;
-  const hasWeek = b.pipeline_count !== undefined || b.pipeline_note !== undefined || b.status !== undefined;
+  const hasWeek = b.status !== undefined;
   if (!hasMetrics && !hasWeek) return res.status(400).json({ error: 'Nothing to save' });
   if (hasMetrics) {
     const day = b.day ? editableDay(b.day) : nzDay();
@@ -304,8 +365,6 @@ app.post('/api/me/entry', requireUser, (req, res) => {
   if (hasWeek) {
     const w = thisWeek(); ensureEntry(req.user.id, w);
     const sets = [], vals = [];
-    if (b.pipeline_count !== undefined) { sets.push('pipeline_count=?'); vals.push(Math.max(0, Math.min(100000, parseInt(b.pipeline_count, 10) || 0))); }
-    if (b.pipeline_note !== undefined) { sets.push('pipeline_note=?'); vals.push(String(b.pipeline_note).slice(0, 300)); }
     if (b.status !== undefined) { sets.push('status=?', 'status_day=?'); vals.push(String(b.status).slice(0, 120), nzDay()); }
     db.prepare(`UPDATE entries SET ${sets.join(',')} WHERE user_id=? AND week_start=?`).run(...vals, req.user.id, w);
     const today = nzDay();
@@ -326,11 +385,58 @@ app.get('/api/me/history', requireUser, (req, res) => {
   res.json([...byWeek.values()].sort((a, b) => b.week_start.localeCompare(a.week_start)).slice(0, 26));
 });
 
+function pipelineId(v) { const id = Number(v); return Number.isInteger(id) && id > 0 ? id : null; }
+function ownPipeline(userId, id) {
+  return db.prepare('SELECT id, address, notes, stage, created_at, updated_at FROM pipeline_entries WHERE id=? AND user_id=?').get(id, userId);
+}
+app.get('/api/me/pipeline', requireUser, (req, res) => {
+  const entries = db.prepare('SELECT id, address, notes, stage, created_at, updated_at FROM pipeline_entries WHERE user_id=? ORDER BY id DESC').all(req.user.id);
+  res.json({ entries, stages: PIPELINE_STAGES.filter(Boolean) });
+});
+app.get('/api/me/pipeline/:id', requireUser, (req, res) => {
+  const id = pipelineId(req.params.id);
+  const row = id && ownPipeline(req.user.id, id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  res.json(row);
+});
+app.post('/api/me/pipeline', requireUser, (req, res) => {
+  const b = req.body || {};
+  const address = cleanAddress(b.address);
+  if (!address) return res.status(400).json({ error: 'Property address is required' });
+  const stage = b.stage === undefined || b.stage === '' ? '' : cleanStage(b.stage);
+  if (stage === null) return res.status(400).json({ error: 'Unknown stage' });
+  const info = db.prepare(`INSERT INTO pipeline_entries(user_id,address,notes,stage,created_at,updated_at) VALUES(?,?,?,?,datetime('now'),datetime('now'))`)
+    .run(req.user.id, address, cleanNotes(b.notes), stage);
+  res.json({ ok: true, entry: ownPipeline(req.user.id, Number(info.lastInsertRowid)) });
+});
+app.post('/api/me/pipeline/:id', requireUser, (req, res) => {
+  const id = pipelineId(req.params.id);
+  const row = id && ownPipeline(req.user.id, id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const address = b.address === undefined ? row.address : cleanAddress(b.address);
+  if (!address) return res.status(400).json({ error: 'Property address is required' });
+  const stage = b.stage === undefined ? row.stage : cleanStage(b.stage);
+  if (stage === null) return res.status(400).json({ error: 'Unknown stage' });
+  const notes = b.notes === undefined ? row.notes : cleanNotes(b.notes);
+  db.prepare(`UPDATE pipeline_entries SET address=?, notes=?, stage=?, updated_at=datetime('now') WHERE id=? AND user_id=?`).run(address, notes, stage, id, req.user.id);
+  const entry = ownPipeline(req.user.id, id);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true, entry });
+});
+app.post('/api/me/pipeline/:id/delete', requireUser, (req, res) => {
+  const id = pipelineId(req.params.id);
+  if (!id) return res.status(404).json({ error: 'Not found' });
+  const changed = db.prepare('DELETE FROM pipeline_entries WHERE id=? AND user_id=?').run(id, req.user.id);
+  if (!changed.changes) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
 // --- TV (token) ---
 app.get('/api/tv', (req, res) => {
   if (!req.query.key || req.query.key !== getSetting('tv_key')) return res.status(403).json({ error: 'Bad key' });
   const t = teamData(thisWeek());
-  // TV shows team totals, status board and leaderboard only (no history). "Entered" means any number logged this week.
+  // Counts only. Addresses stay off the TV. "Entered" means any number logged this week.
   t.rows = t.rows.map(r => ({ name: r.name, entered: r.entered, working_today: r.working_today, status: r.status, pipeline_count: r.pipeline_count, appr_done: r.appr_done, appr_booked: r.appr_booked, cold_calls: r.cold_calls, door_knocks: r.door_knocks, letter_drops: r.letter_drops, score: r.score }));
   res.set('Cache-Control', 'no-store'); res.json(t);
 });
@@ -414,9 +520,41 @@ app.get('/api/admin/export.csv', requireAdmin, (req, res) => {
     const sums = sumMetrics(a.id, week, addDays(week, 6));
     const e = db.prepare('SELECT pipeline_count, pipeline_note FROM entries WHERE user_id=? AND week_start=?').get(a.id, week);
     if (!enteredMetrics(sums) && !e) continue;
+    // pipeline_count / pipeline_note remain the old weekly snapshot. Address rows are a separate CSV.
     rows.push({ week_start: week, week_end: addDays(week, 6), name: a.name, email: a.email, ...sums, pipeline_count: e ? e.pipeline_count : 0, pipeline_note: e ? e.pipeline_note : '' });
   }
   sendCsv(res, `tgb-week-${all ? 'all' : weeks[0]}.csv`, ['week_start', 'week_end', 'name', 'email', ...METRICS, 'pipeline_count', 'pipeline_note'], rows);
+});
+
+function pipelineAgents(userId) {
+  if (userId) {
+    const one = db.prepare("SELECT id, name, email, active FROM users WHERE id=? AND role='agent'").get(userId);
+    return one ? [one] : null;
+  }
+  return db.prepare("SELECT id, name, email, active FROM users WHERE role='agent' ORDER BY name").all();
+}
+function pipelineGrouped(userId) {
+  const agents = pipelineAgents(userId);
+  if (!agents) return null;
+  const stmt = db.prepare('SELECT id, address, notes, stage, created_at, updated_at FROM pipeline_entries WHERE user_id=? ORDER BY id DESC');
+  return agents.map(a => {
+    const entries = stmt.all(a.id);
+    return { id: a.id, name: a.name, email: a.email, active: a.active, count: entries.length, entries };
+  });
+}
+app.get('/api/admin/pipeline', requireAdmin, (req, res) => {
+  if (req.query.user_id !== undefined && !pipelineId(req.query.user_id)) return res.status(404).json({ error: 'Not found' });
+  const grouped = pipelineGrouped(req.query.user_id ? Number(req.query.user_id) : null);
+  if (!grouped) return res.status(404).json({ error: 'Not found' });
+  res.json({ agents: grouped });
+});
+app.get('/api/admin/pipeline.csv', requireAdmin, (req, res) => {
+  if (req.query.user_id !== undefined && !pipelineId(req.query.user_id)) return res.status(404).json({ error: 'Not found' });
+  const grouped = pipelineGrouped(req.query.user_id ? Number(req.query.user_id) : null);
+  if (!grouped) return res.status(404).json({ error: 'Not found' });
+  const rows = [];
+  for (const a of grouped) for (const e of [...a.entries].reverse()) rows.push({ name: a.name, email: a.email, address: e.address, notes: e.notes, stage: e.stage, created_at: e.created_at, updated_at: e.updated_at });
+  sendCsv(res, 'tgb-pipeline.csv', ['name', 'email', 'address', 'notes', 'stage', 'created_at', 'updated_at'], rows);
 });
 
 // --- pages ---

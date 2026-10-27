@@ -15,6 +15,12 @@
  <div class="card"><h2>Per agent</h2><p class="muted">Small numbers show the change vs the week before. Tap a name for that agent's history.</p>
   <div class="scroll"><table id="tbl"></table></div></div>
  <div class="card" id="histCard" style="display:none"><div class="row" style="justify-content:space-between"><h2 id="histTitle" style="margin:0"></h2><button class="sec small" onclick="histCard.style.display='none'">Close</button></div><div class="scroll"><table id="histTbl"></table></div></div>
+ <div class="card"><div class="row" style="justify-content:space-between">
+  <h2 style="margin:0">Pipeline</h2>
+  <div class="row"><select id="pipeAgent" style="width:auto"><option value="">All agents</option></select><a class="btn sec" id="pipeCsv" href="/api/admin/pipeline.csv">Pipeline CSV</a></div></div>
+  <p class="muted">Every agent's addresses. Agents only see their own. The TV shows the count, never the address.</p>
+  <div id="pipeBoard"></div>
+ </div>
  <div class="card"><h2>Agents</h2>
   <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
    <div><label>Name</label><input id="nName"></div><div><label>Email</label><input id="nEmail" type="email"></div>
@@ -41,17 +47,26 @@ async function load(){const q=new URLSearchParams({view:curView});if(curPeriod)q
  $('#csvDay').href=month?'/api/admin/export.csv?grain=day&month='+D.month:'/api/admin/export.csv?grain=day&week='+D.week;
  $('#csvRoll').href=month?'/api/admin/export.csv?grain=month&month='+D.month:'/api/admin/export.csv?grain=week&week='+D.week;$('#csvRoll').textContent=month?'Month totals CSV':'Week totals CSV';
  const prev=month?'Last month':'Last week';
- $('#sub').textContent=month?`${fmtMonth(D.month)} · Numbers in ${D.entered_count}/${D.agent_count} agents`:`Week ${fmtWeek(D.week,D.week_end)} · Numbers in ${D.entered_count}/${D.agent_count} agents · Pipeline ${D.totals.pipeline_count} listings`;
- $('#totals').innerHTML=M.map(m=>{const tg=D.targets_apply?(D.targets[m]||0):0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m]||0)}</b><span>${prev} ${D.last_totals[m]||0}${tg?' · target '+tg:''}</span>${tg?`<div class="bar" style="margin-top:6px"><i style="width:${p}%"></i></div>`:''}</div>`}).join('')+(month?'':`<div class="stat"><span>Pipeline (30–90 days)</span><b>${D.totals.pipeline_count}</b><span>listings expected</span></div>`);
+ $('#sub').textContent=month?`${fmtMonth(D.month)} · Numbers in ${D.entered_count}/${D.agent_count} agents`:`Week ${fmtWeek(D.week,D.week_end)} · Numbers in ${D.entered_count}/${D.agent_count} agents · Pipeline ${D.totals.pipeline_count} addresses`;
+ $('#totals').innerHTML=M.map(m=>{const tg=D.targets_apply?(D.targets[m]||0):0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m]||0)}</b><span>${prev} ${D.last_totals[m]||0}${tg?' · target '+tg:''}</span>${tg?`<div class="bar" style="margin-top:6px"><i style="width:${p}%"></i></div>`:''}</div>`}).join('')+(month?'':`<div class="stat"><span>Pipeline now</span><b>${D.totals.pipeline_count}</b><span>addresses on file</span></div>`);
  $('#missH').textContent=month?"Haven't entered numbers this month":"Haven't entered numbers this week";
  $('#missing').innerHTML=D.missing.length?D.missing.map(esc).join(', '):'Everyone has entered numbers ✓';
  const blurb=$('#tbl').closest('.card').querySelector('p');if(blurb)blurb.textContent=month?'Small numbers show the change vs the month before. Tap a name for that agent\'s days.':'Small numbers show the change vs the week before. Tap a name for that agent\'s days.';
- $('#tbl').innerHTML=`<tr><th>Agent</th><th>${month?'Entered':'Today'}</th>${M.map(m=>`<th class="n">${L[m]}</th>`).join('')}${month?'':'<th class="n">Pipeline</th><th>Status / pipeline note</th>'}</tr>`+
-  D.rows.map(r=>`<tr><td><a href="#" onclick="hist(${r.id},'${esc(r.name).replace(/'/g,'')}');return false">${esc(r.name)}</a></td><td>${month?(r.entered?'<span class="pill on">Yes</span>':'<span class="pill off">No</span>'):(r.working_today?'<span class="pill on">Working</span>':'<span class="pill off">—</span>')}</td>${M.map(m=>`<td class="n">${r[m]} ${delta(r[m],(r.last||{})[m]||0)}</td>`).join('')}${month?'':`<td class="n">${r.pipeline_count}</td><td class="muted">${esc(r.status)}${r.status&&r.pipeline_note?'<br>':''}${esc(r.pipeline_note)}</td>`}</tr>`).join('')+
+ $('#tbl').innerHTML=`<tr><th>Agent</th><th>${month?'Entered':'Today'}</th>${M.map(m=>`<th class="n">${L[m]}</th>`).join('')}${month?'':'<th class="n">Pipeline now</th><th>Status</th>'}</tr>`+
+  D.rows.map(r=>`<tr><td><a href="#" onclick="hist(${r.id},'${esc(r.name).replace(/'/g,'')}');return false">${esc(r.name)}</a></td><td>${month?(r.entered?'<span class="pill on">Yes</span>':'<span class="pill off">No</span>'):(r.working_today?'<span class="pill on">Working</span>':'<span class="pill off">—</span>')}</td>${M.map(m=>`<td class="n">${r[m]} ${delta(r[m],(r.last||{})[m]||0)}</td>`).join('')}${month?'':`<td class="n">${r.pipeline_count}</td><td class="muted">${esc(r.status)}</td>`}</tr>`).join('')+
   `<tr style="font-weight:700"><td>Team</td><td></td>${M.map(m=>`<td class="n">${D.totals[m]}</td>`).join('')}${month?'':`<td class="n">${D.totals.pipeline_count}</td><td></td>`}</tr>`;
+ loadPipeline();
  $('#targets').innerHTML=M.map(m=>`<div><label>${L[m]}</label><input type="number" min="0" id="t_${m}" value="${D.targets[m]}"></div>`).join('');
  const u=`${location.origin}/tv?key=${D.tv_key}`;$('#tvurl').value=u;$('#tvopen').href=u;
  loadUsers()}
+async function loadPipeline(){const users=await api('/api/admin/users');const agents=users.filter(u=>u.role==='agent');const cur=$('#pipeAgent').value;
+ $('#pipeAgent').innerHTML='<option value="">All agents</option>'+agents.map(a=>`<option value="${a.id}">${esc(a.name)}${a.active?'':' (inactive)'}</option>`).join('');
+ $('#pipeAgent').value=agents.some(a=>String(a.id)===cur)?cur:'';
+ const q=$('#pipeAgent').value?'?user_id='+encodeURIComponent($('#pipeAgent').value):'';
+ $('#pipeCsv').href='/api/admin/pipeline.csv'+q;
+ const d=await api('/api/admin/pipeline'+q);
+ $('#pipeBoard').innerHTML=d.agents.length?d.agents.map(a=>`<h3 style="margin-top:14px">${esc(a.name)}${a.active?'':' <span class="pill off">inactive</span>'} <span class="muted">${a.count}</span></h3>`+(a.entries.length?a.entries.map(e=>`<div class="metric"><div><div class="name">${esc(e.address)}</div><div class="sub">${esc(e.stage||'No stage')}${e.notes?' · '+esc(e.notes):''}</div></div></div>`).join(''):'<p class="muted">No addresses yet.</p>')).join(''):'<p class="muted">No agents yet.</p>'}
+$('#pipeAgent').onchange=()=>loadPipeline();
 async function loadUsers(){const us=await api('/api/admin/users');const me=us.find(x=>x.role==='admin'&&x.email.toLowerCase()==='gary.bal@harcourts.co.nz');if(me&&me.must_change)$('#pwb').style.display='block';
  $('#users').innerHTML='<tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr>'+us.map(x=>`<tr><td>${esc(x.name)}${x.role==='admin'?' <span class="pill on">admin</span>':''}</td><td>${esc(x.email)}</td><td>${x.active?'Active':'Inactive'}${x.must_change?' · temp password':''}</td><td>${x.role==='admin'?'':`<div class="row"><button class="sec small" onclick="resetPw(${x.id})">Reset password</button><button class="sec small" onclick="setActive(${x.id},${x.active?0:1})">${x.active?'Deactivate':'Activate'}</button><button class="danger small" onclick="del(${x.id},'${esc(x.name).replace(/'/g,'')}')">Delete</button></div>`}</td></tr>`).join('')}
 async function addAgent(){$('#addErr').textContent='';$('#addOk').textContent='';try{const pw=nPw.value||genPw();await api('/api/admin/users',{body:{name:nName.value,email:nEmail.value,password:pw}});
