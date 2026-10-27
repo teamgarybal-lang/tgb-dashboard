@@ -11,6 +11,8 @@
   <p class="muted" id="sub"></p>
   <div id="totals" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
  </div>
+ <div class="card" id="dailyCard"><h2>Daily this week</h2><p class="muted" id="dailyNote"></p><div class="scroll"><table id="daily"></table></div></div>
+ <div class="card" id="lbCard"><h2>Leaderboard</h2><p class="muted">Score: 30 per appraisal done, 20 per appraisal booked, and 1 each for calls, knocks and letter drops.</p><div id="lb"></div></div>
  <div class="card"><h3 id="missH">Haven't entered numbers this week</h3><div id="missing" class="muted"></div></div>
  <div class="card"><h2>Per agent</h2><p class="muted">Small numbers show the change vs the week before. Tap a name for that agent's history.</p>
   <div class="scroll"><table id="tbl"></table></div></div>
@@ -48,13 +50,19 @@ async function load(){const q=new URLSearchParams({view:curView});if(curPeriod)q
  $('#csvRoll').href=month?'/api/admin/export.csv?grain=month&month='+D.month:'/api/admin/export.csv?grain=week&week='+D.week;$('#csvRoll').textContent=month?'Month totals CSV':'Week totals CSV';
  const prev=month?'Last month':'Last week';
  $('#sub').textContent=month?`${fmtMonth(D.month)} · Numbers in ${D.entered_count}/${D.agent_count} agents`:`Week ${fmtWeek(D.week,D.week_end)} · Numbers in ${D.entered_count}/${D.agent_count} agents · Pipeline ${D.totals.pipeline_count} addresses`;
- $('#totals').innerHTML=M.map(m=>{const tg=D.targets_apply?(D.targets[m]||0):0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m]||0)}</b><span>${prev} ${D.last_totals[m]||0}${tg?' · target '+tg:''}</span>${tg?`<div class="bar" style="margin-top:6px"><i style="width:${p}%"></i></div>`:''}</div>`}).join('')+(month?'':`<div class="stat"><span>Pipeline now</span><b>${D.totals.pipeline_count}</b><span>addresses on file</span></div>`);
+ $('#totals').innerHTML=M.map(m=>{const tg=D.targets_apply?(D.targets[m]||0):0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat s-${m}"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m]||0)}</b><span>${prev} ${D.last_totals[m]||0}${tg?' · target '+tg:''}</span>${tg?`<div class="bar s-${m}" style="margin-top:6px"><i style="width:${p}%"></i></div>`:''}</div>`}).join('')+(month?'':`<div class="stat s-pipe"><span>Pipeline now</span><b>${D.totals.pipeline_count}</b><span>addresses on file</span></div>`);
  $('#missH').textContent=month?"Haven't entered numbers this month":"Haven't entered numbers this week";
  $('#missing').innerHTML=D.missing.length?D.missing.map(esc).join(', '):'Everyone has entered numbers ✓';
  const blurb=$('#tbl').closest('.card').querySelector('p');if(blurb)blurb.textContent=month?'Small numbers show the change vs the month before. Tap a name for that agent\'s days.':'Small numbers show the change vs the week before. Tap a name for that agent\'s days.';
- $('#tbl').innerHTML=`<tr><th>Agent</th><th>${month?'Entered':'Today'}</th>${M.map(m=>`<th class="n">${L[m]}</th>`).join('')}${month?'':'<th class="n">Pipeline now</th><th>Status</th>'}</tr>`+
-  D.rows.map(r=>`<tr><td><a href="#" onclick="hist(${r.id},'${esc(r.name).replace(/'/g,'')}');return false">${esc(r.name)}</a></td><td>${month?(r.entered?'<span class="pill on">Yes</span>':'<span class="pill off">No</span>'):(r.working_today?'<span class="pill on">Working</span>':'<span class="pill off">—</span>')}</td>${M.map(m=>`<td class="n">${r[m]} ${delta(r[m],(r.last||{})[m]||0)}</td>`).join('')}${month?'':`<td class="n">${r.pipeline_count}</td><td class="muted">${esc(r.status)}</td>`}</tr>`).join('')+
-  `<tr style="font-weight:700"><td>Team</td><td></td>${M.map(m=>`<td class="n">${D.totals[m]}</td>`).join('')}${month?'':`<td class="n">${D.totals.pipeline_count}</td><td></td>`}</tr>`;
+ $('#tbl').innerHTML=`<tr><th>Agent</th>${month?'<th>Entered</th>':''}${M.map(m=>`<th class="n">${L[m]}</th>`).join('')}${month?'':'<th class="n">Pipeline now</th>'}</tr>`+
+  D.rows.map(r=>`<tr><td><a href="#" onclick="hist(${r.id},'${esc(r.name).replace(/'/g,'')}');return false">${esc(r.name)}</a></td>${month?`<td>${r.entered?'<span class="pill on">Yes</span>':'<span class="pill off">No</span>'}</td>`:''}${M.map(m=>`<td class="n">${r[m]} ${delta(r[m],(r.last||{})[m]||0)}</td>`).join('')}${month?'':`<td class="n">${r.pipeline_count}</td>`}</tr>`).join('')+
+  `<tr style="font-weight:700"><td>Team</td>${month?'<td></td>':''}${M.map(m=>`<td class="n">${D.totals[m]}</td>`).join('')}${month?'':`<td class="n">${D.totals.pipeline_count}</td>`}</tr>`;
+ const DOW=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+ $('#dailyCard').style.display=month?'none':'';$('#lbCard').style.display=month?'none':'';
+ if(!month){$('#dailyNote').textContent=`Team totals each day, ${fmtWeek(D.week,D.week_end)}.`;
+  $('#daily').innerHTML=`<tr><th>Metric</th>${(D.daily||[]).map((d,i)=>`<th class="n${d.day===D.today?' today':''}">${DOW[i]}</th>`).join('')}</tr>`+M.map(m=>`<tr class="s-${m}"><td>${esc(L[m])}</td>${(D.daily||[]).map(d=>`<td class="n${d.day===D.today?' today':''}${d.day>D.today?' future':''}">${d[m]||0}</td>`).join('')}</tr>`).join('');
+  const lb=[...D.rows].filter(r=>r.score>0).sort((a,b)=>b.score-a.score);const medal=['gold','silver','bronze'];
+  $('#lb').innerHTML=lb.length?lb.map((r,i)=>`<div class="rank ${medal[i]||''}"><div class="rk">${i+1}</div><div><b>${esc(r.name)}</b><div class="muted">${r.appr_done} done · ${r.appr_booked} booked · ${r.cold_calls} calls · ${r.door_knocks} knocks · ${r.letter_drops} drops</div></div><div class="sc">${r.score}</div></div>`).join(''):'<p class="muted">No numbers in yet this week.</p>';}
  loadPipeline();
  $('#targets').innerHTML=M.map(m=>`<div><label>${L[m]}</label><input type="number" min="0" id="t_${m}" value="${D.targets[m]}"></div>`).join('');
  const u=`${location.origin}/tv?key=${D.tv_key}`;$('#tvurl').value=u;$('#tvopen').href=u;

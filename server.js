@@ -267,27 +267,38 @@ function listMonths() {
 function pipelineCountMap() {
   return Object.fromEntries(db.prepare('SELECT user_id, COUNT(*) AS n FROM pipeline_entries GROUP BY user_id').all().map(r => [r.user_id, r.n]));
 }
+function weekDays(week) { const out = []; for (let i = 0; i < 7; i++) out.push(addDays(week, i)); return out; }
+function dailyTotals(week, userId) {
+  const from = week, to = addDays(week, 6);
+  const cols = METRICS.map(m => `COALESCE(SUM(${userId ? '' : 'd.'}${m}),0) AS ${m}`).join(',');
+  const rows = userId
+    ? db.prepare(`SELECT day, ${cols} FROM day_entries WHERE user_id=? AND day>=? AND day<=? GROUP BY day`).all(userId, from, to)
+    : db.prepare(`SELECT d.day AS day, ${cols} FROM day_entries d JOIN users u ON u.id=d.user_id WHERE u.role='agent' AND u.active=1 AND d.day>=? AND d.day<=? GROUP BY d.day`).all(from, to);
+  const by = Object.fromEntries(rows.map(r => [r.day, r]));
+  return weekDays(week).map(day => {
+    const src = by[day] || {};
+    const o = { day };
+    METRICS.forEach(m => o[m] = src[m] || 0);
+    return o;
+  });
+}
 function teamData(week) {
-  const today = nzDay(); const cur = thisWeek();
+  const today = nzDay();
   const from = week, to = addDays(week, 6);
   const pipes = pipelineCountMap();
   const agents = db.prepare("SELECT id,name FROM users WHERE role='agent' AND active=1 ORDER BY name").all();
   const rows = agents.map(a => {
     const sums = sumMetrics(a.id, from, to);
-    const e = db.prepare('SELECT status, status_day, last_day, updated_at FROM entries WHERE user_id=? AND week_start=?').get(a.id, week) || {};
     const r = { id: a.id, name: a.name, entered: enteredMetrics(sums) };
     Object.assign(r, sums);
     r.pipeline_count = pipes[a.id] || 0;
-    r.working_today = week === cur && e.last_day === today;
-    r.status = (week === cur && e.status_day === today) ? (e.status || '') : '';
-    r.updated_at = e.updated_at || null;
     r.score = scoreOf(r);
     return r;
   });
   const totals = blankMetrics(); METRICS.forEach(m => totals[m] = rows.reduce((s, r) => s + r[m], 0));
   totals.pipeline_count = rows.reduce((s, r) => s + r.pipeline_count, 0);
   return { brand: BRAND, view: 'week', week, week_end: to, today, rows, totals, targets: targetsNow(),
-    entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
+    daily: dailyTotals(week), entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
 }
 function monthData(month) {
   const today = nzDay();
@@ -295,7 +306,7 @@ function monthData(month) {
   const agents = db.prepare("SELECT id,name FROM users WHERE role='agent' AND active=1 ORDER BY name").all();
   const rows = agents.map(a => {
     const sums = sumMetrics(a.id, from, to);
-    const r = { id: a.id, name: a.name, entered: enteredMetrics(sums), pipeline_count: 0, pipeline_note: '', status: '', working_today: false, updated_at: null };
+    const r = { id: a.id, name: a.name, entered: enteredMetrics(sums) };
     Object.assign(r, sums);
     r.score = scoreOf(r);
     return r;
@@ -317,10 +328,6 @@ function saveDayMetrics(uid, day, patch) {
     ON CONFLICT(user_id,day) DO UPDATE SET ${METRICS.map(m => `${m}=excluded.${m}`).join(',')}, updated_at=datetime('now')`)
     .run(uid, day, ...METRICS.map(m => next[m]));
   db.prepare("INSERT INTO activity(user_id,day,ts,field,value) VALUES(?,?,datetime('now'),?,?)").run(uid, day, 'day', JSON.stringify(next).slice(0, 200));
-  if (day === nzDay()) {
-    const w = thisWeek(); ensureEntry(uid, w);
-    db.prepare("UPDATE entries SET last_day=?, updated_at=datetime('now') WHERE user_id=? AND week_start=?").run(day, uid, w);
-  }
   return dayRow(uid, day);
 }
 
@@ -329,14 +336,15 @@ app.get('/api/me', requireUser, (req, res) => {
   const today = nzDay();
   if (req.query.day && !editableDay(req.query.day)) return res.status(400).json({ error: 'Pick today or a day in the last 14 days' });
   const day = req.query.day ? editableDay(req.query.day) : today;
-  const w = thisWeek(); const e = ensureEntry(req.user.id, w); const t = teamData(w);
+  const w = thisWeek(); ensureEntry(req.user.id, w); const t = teamData(w);
   const month = monthOf(today);
   const entry = dayRow(req.user.id, day);
   res.json({
     user: req.user, today, day, recent_days: recentDays(today),
-    entry: { ...entry, status: e.status_day === today ? e.status : '', working_today: e.last_day === today },
+    entry,
     week: { week: w, week_end: addDays(w, 6), ...sumMetrics(req.user.id, w, addDays(w, 6)) },
     month: { month, ...sumMetrics(req.user.id, month + '-01', monthEnd(month)) },
+    daily: dailyTotals(w, req.user.id),
     team: { totals: t.totals, targets: t.targets, entered_count: t.entered_count, agent_count: t.agent_count, week: w, week_end: t.week_end },
     labels: LABELS
   });
@@ -354,23 +362,10 @@ app.post('/api/me/entry', requireUser, (req, res) => {
   const b = req.body || {};
   const metricPatch = {};
   for (const m of METRICS) if (b[m] !== undefined) metricPatch[m] = Math.max(0, Math.min(100000, parseInt(b[m], 10) || 0));
-  const hasMetrics = Object.keys(metricPatch).length > 0;
-  const hasWeek = b.status !== undefined;
-  if (!hasMetrics && !hasWeek) return res.status(400).json({ error: 'Nothing to save' });
-  if (hasMetrics) {
-    const day = b.day ? editableDay(b.day) : nzDay();
-    if (!day) return res.status(400).json({ error: 'Pick today or a day in the last 14 days' });
-    saveDayMetrics(req.user.id, day, metricPatch);
-  }
-  if (hasWeek) {
-    const w = thisWeek(); ensureEntry(req.user.id, w);
-    const sets = [], vals = [];
-    if (b.status !== undefined) { sets.push('status=?', 'status_day=?'); vals.push(String(b.status).slice(0, 120), nzDay()); }
-    db.prepare(`UPDATE entries SET ${sets.join(',')} WHERE user_id=? AND week_start=?`).run(...vals, req.user.id, w);
-    const today = nzDay();
-    db.prepare("UPDATE entries SET last_day=?, updated_at=datetime('now') WHERE user_id=? AND week_start=?").run(today, req.user.id, w);
-    db.prepare("INSERT INTO activity(user_id,day,ts,field,value) VALUES(?,?,datetime('now'),?,?)").run(req.user.id, today, 'save', JSON.stringify(b).slice(0, 200));
-  }
+  if (!Object.keys(metricPatch).length) return res.status(400).json({ error: 'Nothing to save' });
+  const day = b.day ? editableDay(b.day) : nzDay();
+  if (!day) return res.status(400).json({ error: 'Pick today or a day in the last 14 days' });
+  saveDayMetrics(req.user.id, day, metricPatch);
   res.json({ ok: true });
 });
 app.get('/api/me/history', requireUser, (req, res) => {
@@ -436,8 +431,8 @@ app.post('/api/me/pipeline/:id/delete', requireUser, (req, res) => {
 app.get('/api/tv', (req, res) => {
   if (!req.query.key || req.query.key !== getSetting('tv_key')) return res.status(403).json({ error: 'Bad key' });
   const t = teamData(thisWeek());
-  // Counts only. Addresses stay off the TV. "Entered" means any number logged this week.
-  t.rows = t.rows.map(r => ({ name: r.name, entered: r.entered, working_today: r.working_today, status: r.status, pipeline_count: r.pipeline_count, appr_done: r.appr_done, appr_booked: r.appr_booked, cold_calls: r.cold_calls, door_knocks: r.door_knocks, letter_drops: r.letter_drops, score: r.score }));
+  // Counts and scores only. No addresses, and no check-in status.
+  t.rows = t.rows.map(r => ({ name: r.name, entered: r.entered, pipeline_count: r.pipeline_count, appr_done: r.appr_done, appr_booked: r.appr_booked, cold_calls: r.cold_calls, door_knocks: r.door_knocks, letter_drops: r.letter_drops, score: r.score }));
   res.set('Cache-Control', 'no-store'); res.json(t);
 });
 
