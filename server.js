@@ -619,9 +619,10 @@ function tvReject(req, res, json) {
   return res.status(403).type('html').send(tvCodePage('That code is not right.'));
 }
 app.get('/api/tv', (req, res) => {
+  // The board is public. A key is optional so older /tv?key= links still work.
+  // A wrong key is still rejected. No key returns the same read-only payload.
   const given = req.query.key != null && String(req.query.key) !== '' ? String(req.query.key).trim().toLowerCase() : '';
-  const ok = given ? given === getSetting('tv_key') : req.cookies.tv === getSetting('tv_key');
-  if (!ok) return given ? tvReject(req, res, true) : res.status(403).json({ error: 'Bad key' });
+  if (given && !tvCodeOk(given)) return tvReject(req, res, true);
   const t = teamData(thisWeek());
   const md = monthData(monthOf(t.today));
   const scaled = monthTargetsFromWeekly(md.month, t.targets);
@@ -797,14 +798,16 @@ app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));
 app.get('/admin', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); if (u.role !== 'admin') return res.redirect('/me'); page('admin.html')(req, res); });
-app.get('/tv', (req, res) => {
+function openTv(req, res) {
   if (req.query.key != null && String(req.query.key) !== '') {
     if (tvCodeOk(req.query.key)) { setTvCookie(req, res); return res.redirect('/tv'); }
     return tvReject(req, res, false);
   }
-  if (req.cookies.tv === getSetting('tv_key')) return page('tv.html')(req, res);
-  res.type('html').send(tvCodePage(''));
-});
+  res.set('Cache-Control', 'no-store');
+  return page('tv.html')(req, res);
+}
+app.get('/tv', openTv);
+app.get('/tv/', openTv);
 app.get('/tv/:code', (req, res) => {
   if (tvCodeOk(req.params.code)) { setTvCookie(req, res); return res.redirect('/tv'); }
   return tvReject(req, res, false);
