@@ -71,6 +71,13 @@ else {
   if (changed) setSetting('targets', JSON.stringify(t));
 }
 const targetsNow = () => JSON.parse(getSetting('targets'));
+// No monthly targets are stored. The TV scales the weekly target by the length of the calendar month.
+function monthTargetsFromWeekly(month, weekly) {
+  const days = Number(monthEnd(month).slice(8));
+  const targets = {};
+  METRICS.forEach(m => targets[m] = Math.round((weekly[m] || 0) * days / 7));
+  return { days, targets, basis: 'weekly × days ÷ 7' };
+}
 
 // Admin bootstrap
 const ADMIN_EMAIL = 'gary.bal@harcourts.co.nz';
@@ -518,6 +525,14 @@ app.post('/api/me/pipeline/:id/delete', requireUser, (req, res) => {
 app.get('/api/tv', (req, res) => {
   if (!req.query.key || req.query.key !== getSetting('tv_key')) return res.status(403).json({ error: 'Bad key' });
   const t = teamData(thisWeek());
+  const md = monthData(monthOf(t.today));
+  const scaled = monthTargetsFromWeekly(md.month, t.targets);
+  t.month = md.month;
+  t.month_totals = blankMetrics();
+  METRICS.forEach(m => t.month_totals[m] = md.totals[m] || 0);
+  t.month_targets = scaled.targets;
+  t.month_days = scaled.days;
+  t.month_target_basis = scaled.basis;
   // Counts and scores only. No addresses, and no check-in status.
   t.rows = t.rows.map(r => ({ name: r.name, entered: r.entered, pipeline_count: r.pipeline_count, appr_done: r.appr_done, appr_booked: r.appr_booked, cold_calls: r.cold_calls, door_knocks: r.door_knocks, letter_drops: r.letter_drops, score: r.score }));
   res.set('Cache-Control', 'no-store'); res.json(t);

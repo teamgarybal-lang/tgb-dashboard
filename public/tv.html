@@ -15,18 +15,19 @@ body{background:radial-gradient(900px 480px at 8% -10%, rgba(0,173,239,.28), tra
 .brand img{height:46px;width:auto;display:block}
 .meta{text-align:right}.meta b{display:block;font-size:34px;letter-spacing:-.03em;line-height:1}.meta span{color:var(--mut);font-size:18px}
 .main{height:calc(100% - 92px);display:grid;grid-template-columns:500px 1fr 470px;gap:18px;padding:8px 22px 20px}
-.panel{background:linear-gradient(180deg,rgba(16,40,76,.96),rgba(10,28,54,.96));border:1px solid rgba(255,255,255,.08);border-radius:22px;padding:18px 18px 16px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 40px rgba(0,0,0,.22)}
-h2{margin:0 0 12px;font-size:15px;text-transform:uppercase;letter-spacing:.14em;color:#8FD9F8}
-.m{margin-bottom:11px}.m .lab{display:flex;justify-content:space-between;align-items:flex-end;gap:8px}
-.m .name{font-size:16px;font-weight:700}.m .v{font-size:40px;font-weight:800;letter-spacing:-.04em;line-height:.9}.m .t{color:var(--mut);font-size:16px;font-weight:600}
-.bar{height:10px;background:rgba(0,0,0,.28);border-radius:99px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;border-radius:99px}
+.panel{background:linear-gradient(180deg,rgba(16,40,76,.96),rgba(10,28,54,.96));border:1px solid rgba(255,255,255,.08);border-radius:22px;padding:14px 16px 12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 40px rgba(0,0,0,.22)}
+h2{margin:0 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:.14em;color:#8FD9F8}
+h2.again{margin-top:14px}
+.m{margin-bottom:6px}.m .lab{display:flex;justify-content:space-between;align-items:flex-end;gap:8px}
+.m .name{font-size:14px;font-weight:700}.m .v{font-size:30px;font-weight:800;letter-spacing:-.04em;line-height:.9}.m .t{color:var(--mut);font-size:14px;font-weight:600}
+.bar{height:7px;background:rgba(0,0,0,.28);border-radius:99px;overflow:hidden;margin-top:3px}.bar i{display:block;height:100%;border-radius:99px}
 .c-appr_done .name,.c-appr_done .v{color:var(--c-appr_done)}.c-appr_done .bar i{background:linear-gradient(90deg,#F6C445,#E39B12)}
 .c-appr_booked .name,.c-appr_booked .v{color:var(--c-appr_booked)}.c-appr_booked .bar i{background:linear-gradient(90deg,#C4B5FD,#7C4DFF)}
 .c-cold_calls .name,.c-cold_calls .v{color:var(--c-cold_calls)}.c-cold_calls .bar i{background:linear-gradient(90deg,#7DDCFF,#00ADEF)}
 .c-door_knocks .name,.c-door_knocks .v{color:var(--c-door_knocks)}.c-door_knocks .bar i{background:linear-gradient(90deg,#FFB199,#FF5A36)}
 .c-letter_drops .name,.c-letter_drops .v{color:var(--c-letter_drops)}.c-letter_drops .bar i{background:linear-gradient(90deg,#8AF0C2,#1FA971)}
-.big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:auto}.big div{background:rgba(0,0,0,.22);border-radius:14px;padding:12px 12px 10px}
-.big b{font-size:40px;display:block;letter-spacing:-.04em;line-height:1}.big span{color:var(--mut);font-size:14px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:auto}.big div{background:rgba(0,0,0,.22);border-radius:14px;padding:10px 12px 8px}
+.big b{font-size:34px;display:block;letter-spacing:-.04em;line-height:1}.big span{color:var(--mut);font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 table{width:100%;border-collapse:collapse;margin-top:4px}th,td{padding:8px 4px;text-align:right;font-variant-numeric:tabular-nums}
 th{color:var(--mut);font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 td.lab,th.lab{text-align:left;font-weight:800;font-size:16px}
@@ -49,7 +50,8 @@ tr.c-appr_done td.lab{color:var(--c-appr_done)}tr.c-appr_booked td.lab{color:var
 </style></head><body>
 <div class="top"><div class="brand"><img src="/static/logo.png" alt="Harcourts TGB Group"></div><div class="meta"><b id="clock"></b><span id="wk"></span></div></div>
 <div class="main">
- <div class="panel"><h2>Team this week</h2><div id="metrics"></div>
+ <div class="panel" id="left"><h2>Team this week</h2><div id="metrics"></div>
+  <h2 class="again">Team this month</h2><div class="cap" id="monthCap"></div><div id="month"></div>
   <div class="big"><div><span>Numbers in</span><b id="inn">–</b></div><div><span>Pipeline</span><b id="pipe">–</b></div></div></div>
  <div class="panel"><h2>Daily this week</h2><div class="cap">Team total for each day, Monday to Sunday</div><div id="daily"></div><div class="quote" id="quote"></div></div>
  <div class="panel"><h2>Leaderboard</h2><div class="cap">30 per appraisal done · 20 per booked · calls, knocks and drops count as 1</div><div id="lb"></div></div>
@@ -66,7 +68,11 @@ async function load(){try{
  if(r.status===403){document.body.innerHTML='<div style="padding:18vh 8vw;text-align:center;font-size:42px">This TV link has expired or is wrong.<br><span style="color:#9BB0CC;font-size:24px">Open the TV link from the admin page.</span></div>';return}
  const d=await r.json();const f=x=>new Date(x+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short'});
  document.getElementById('wk').textContent=`Week ${f(d.week)} – ${f(d.week_end)}`;
- document.getElementById('metrics').innerHTML=M.map(m=>{const tg=d.targets[m]||0,v=d.totals[m]||0,p=tg?Math.min(100,v/tg*100):0;return `<div class="m c-${m}"><div class="lab"><span class="name">${esc(d.labels[m])}</span><span><span class="v">${v}</span>${tg?`<span class="t"> / ${tg}</span>`:''}</span></div><div class="bar"><i style="width:${p}%"></i></div></div>`}).join('');
+ const rows=(totals,targets)=>M.map(m=>{const tg=targets[m]||0,v=totals[m]||0,p=tg?Math.min(100,v/tg*100):0;return `<div class="m c-${m}"><div class="lab"><span class="name">${esc(d.labels[m])}</span><span><span class="v">${v}</span>${tg?`<span class="t"> / ${tg}</span>`:''}</span></div>${tg?`<div class="bar"><i style="width:${p}%"></i></div>`:''}</div>`}).join('');
+ document.getElementById('metrics').innerHTML=rows(d.totals,d.targets);
+ const monthName=d.month?new Date(d.month+'-01T00:00:00').toLocaleDateString('en-NZ',{month:'long'}):'';
+ document.getElementById('monthCap').textContent=d.month_targets?`${monthName} · target = weekly × ${d.month_days} days ÷ 7`:'';
+ document.getElementById('month').innerHTML=rows(d.month_totals||{},d.month_targets||{});
  document.getElementById('inn').textContent=`${d.entered_count}/${d.agent_count}`;
  document.getElementById('pipe').textContent=d.totals.pipeline_count;
  const days=d.daily||[];
