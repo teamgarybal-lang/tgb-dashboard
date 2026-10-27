@@ -158,6 +158,93 @@ function weekStartOf(day) { // Monday of the week containing day (YYYY-MM-DD)
   return dt.toISOString().slice(0, 10);
 }
 function addDays(day, n) { const [y, m, d] = day.split('-').map(Number); const dt = new Date(Date.UTC(y, m - 1, d + n)); return dt.toISOString().slice(0, 10); }
+const QUOTES = [
+  { text: 'Genius is one percent inspiration and ninety-nine percent perspiration.', author: 'Thomas Edison' },
+  { text: 'Opportunity is missed by most people because it is dressed in overalls and looks like work.', author: 'Thomas Edison' },
+  { text: 'Nothing in this world can take the place of persistence.', author: 'Calvin Coolidge' },
+  { text: 'Do what you can, with what you have, where you are.', author: 'Theodore Roosevelt' },
+  { text: 'Diligence is the mother of good luck.', author: 'Benjamin Franklin' },
+  { text: 'Well done is better than well said.', author: 'Benjamin Franklin' },
+  { text: 'Never leave that till tomorrow which you can do today.', author: 'Benjamin Franklin' },
+  { text: 'Lost time is never found again.', author: 'Benjamin Franklin' },
+  { text: 'He that is good for making excuses is seldom good for anything else.', author: 'Benjamin Franklin' },
+  { text: 'Success is to be measured not so much by the position that one has reached in life as by the obstacles which he has overcome.', author: 'Booker T. Washington' },
+  { text: 'Alone we can do so little; together we can do so much.', author: 'Helen Keller' },
+  { text: "Whether you think you can, or you think you can't, you're right.", author: 'Henry Ford' },
+  { text: 'A journey of a thousand miles begins with a single step.', author: 'Lao Tzu' },
+  { text: 'We are what we repeatedly do. Excellence, then, is not an act but a habit.', author: 'Will Durant' },
+  { text: 'People will forget what you said, people will forget what you did, but people will never forget how you made them feel.', author: 'Maya Angelou' },
+  { text: 'You can have everything in life you want, if you will just help enough other people get what they want.', author: 'Zig Ziglar' },
+  { text: 'There are no traffic jams on the extra mile.', author: 'Zig Ziglar' },
+  { text: 'Your attitude, not your aptitude, will determine your altitude.', author: 'Zig Ziglar' },
+  { text: 'Either you run the day, or the day runs you.', author: 'Jim Rohn' },
+  { text: 'Success is nothing more than a few simple disciplines, practiced every day.', author: 'Jim Rohn' },
+  { text: "Don't wish it were easier. Wish you were better.", author: 'Jim Rohn' },
+  { text: 'Motivation is what gets you started. Habit is what keeps you going.', author: 'Jim Rohn' },
+  { text: 'We become what we think about.', author: 'Earl Nightingale' },
+  { text: 'Success is the progressive realization of a worthy ideal.', author: 'Earl Nightingale' },
+  { text: 'Whatever the mind can conceive and believe, it can achieve.', author: 'Napoleon Hill' },
+  { text: "Don't wait. The time will never be just right.", author: 'Napoleon Hill' },
+  { text: 'Strength and growth come only through continuous effort and struggle.', author: 'Napoleon Hill' },
+  { text: 'People rarely succeed unless they have fun in what they are doing.', author: 'Dale Carnegie' },
+  { text: 'Take a chance. All life is a chance.', author: 'Dale Carnegie' },
+  { text: 'I will persist until I succeed.', author: 'Og Mandino' },
+  { text: 'I will act now.', author: 'Og Mandino' },
+  { text: 'You can only grow if you are willing to feel awkward and uncomfortable when you try something new.', author: 'Brian Tracy' },
+  { text: "Pretend that every single person you meet has a sign around his or her neck that says, 'Make me feel important.'", author: 'Mary Kay Ash' },
+  { text: 'We fall forward to succeed.', author: 'Mary Kay Ash' },
+  { text: "Dig your well before you're thirsty.", author: 'Harvey Mackay' },
+  { text: 'A leader is one who knows the way, goes the way, and shows the way.', author: 'John C. Maxwell' },
+  { text: 'Fail early, fail often, but always fail forward.', author: 'John C. Maxwell' },
+  { text: "You don't have to be great to start, but you have to start to be great.", author: 'Les Brown' },
+  { text: 'Sales are contingent upon the attitude of the salesman, not the attitude of the prospect.', author: 'W. Clement Stone' },
+  { text: 'Thinking will not overcome fear, but action will.', author: 'W. Clement Stone' },
+  { text: 'Force yourself to act enthusiastic, and you will become enthusiastic.', author: 'Frank Bettger' },
+  { text: 'Success is your duty, obligation, and responsibility.', author: 'Grant Cardone' },
+  { text: "People don't like to be sold, but they love to buy.", author: 'Jeffrey Gitomer' },
+  { text: 'The path to success is to take massive, determined action.', author: 'Tony Robbins' },
+  { text: 'The main thing is to keep the main thing the main thing.', author: 'Stephen R. Covey' },
+  { text: 'Begin with the end in mind.', author: 'Stephen R. Covey' },
+  { text: 'The best way to predict the future is to invent it.', author: 'Alan Kay' },
+  { text: "I can accept failure. Everyone fails at something. But I can't accept not trying.", author: 'Michael Jordan' },
+  { text: 'Rest at the end, not in the middle.', author: 'Kobe Bryant' },
+  { text: 'I really think a champion is defined not by their wins but by how they can recover when they fall.', author: 'Serena Williams' },
+  { text: 'There are no secrets to success. It is the result of preparation, hard work, and learning from failure.', author: 'Colin Powell' },
+  { text: "It's quite simple, really. Double your rate of failure.", author: 'Thomas J. Watson' },
+  { text: 'There is only one boss. The customer.', author: 'Sam Walton' },
+  { text: 'The way to get started is to quit talking and begin doing.', author: 'Walt Disney' },
+  { text: 'All our dreams can come true, if we have the courage to pursue them.', author: 'Walt Disney' },
+  { text: 'The only way to do great work is to love what you do.', author: 'Steve Jobs' },
+  { text: 'If somebody offers you an amazing opportunity but you are not sure you can do it, say yes, then learn how to do it later.', author: 'Richard Branson' },
+  { text: "People don't buy what you do; they buy why you do it.", author: 'Simon Sinek' },
+  { text: 'In a crowded marketplace, fitting in is failing.', author: 'Seth Godin' },
+  { text: 'Under-promise and over-deliver.', author: 'Tom Peters' },
+  { text: 'Success is the sum of small efforts, repeated day in and day out.', author: 'Robert Collier' },
+  { text: 'You do not rise to the level of your goals. You fall to the level of your systems.', author: 'James Clear' },
+  { text: 'Enthusiasm is common. Endurance is rare.', author: 'Angela Duckworth' },
+  { text: 'Becoming is better than being.', author: 'Carol Dweck' },
+  { text: 'What stands in the way becomes the way.', author: 'Marcus Aurelius' },
+  { text: 'No one knows what he can do until he tries.', author: 'Publilius Syrus' },
+  { text: 'They can because they think they can.', author: 'Virgil' },
+  { text: 'What you do speaks so loudly that I cannot hear what you say.', author: 'Ralph Waldo Emerson' },
+  { text: 'Make each day your masterpiece.', author: 'John Wooden' },
+  { text: 'Do not let what you cannot do interfere with what you can do.', author: 'John Wooden' },
+  { text: 'Perfection is not attainable, but if we chase perfection we can catch excellence.', author: 'Vince Lombardi' },
+  { text: "It's not the will to win that matters. It's the will to prepare to win that matters.", author: 'Bear Bryant' },
+  { text: "Success is a project that's always under construction.", author: 'Pat Summitt' },
+  { text: 'Ability is what you are capable of doing. Motivation determines what you do. Attitude determines how well you do it.', author: 'Lou Holtz' },
+  { text: 'A dream becomes a goal when action is taken toward its achievement.', author: 'Bo Bennett' },
+  { text: 'What you do today can improve all your tomorrows.', author: 'Robin Sharma' },
+  { text: 'The best advertising is done by satisfied customers.', author: 'Philip Kotler' },
+  { text: "If you love life, don't waste time, for time is what life is made up of.", author: 'Bruce Lee' },
+  { text: 'Tell the truth, but make the truth fascinating.', author: 'David Ogilvy' },
+];
+function quoteFor(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  const n = Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+  const q = QUOTES[((n % QUOTES.length) + QUOTES.length) % QUOTES.length];
+  return { text: q.text, author: q.author };
+}
 const thisWeek = () => weekStartOf(nzDay());
 const validWeek = w => (typeof w === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(w)) ? weekStartOf(w) : thisWeek();
 function validDay(day) {
@@ -298,7 +385,7 @@ function teamData(week) {
   const totals = blankMetrics(); METRICS.forEach(m => totals[m] = rows.reduce((s, r) => s + r[m], 0));
   totals.pipeline_count = rows.reduce((s, r) => s + r.pipeline_count, 0);
   return { brand: BRAND, view: 'week', week, week_end: to, today, rows, totals, targets: targetsNow(),
-    daily: dailyTotals(week), entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
+    daily: dailyTotals(week), quote: quoteFor(today), entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
 }
 function monthData(month) {
   const today = nzDay();
@@ -314,7 +401,7 @@ function monthData(month) {
   const totals = blankMetrics(); METRICS.forEach(m => totals[m] = rows.reduce((s, r) => s + r[m], 0));
   totals.pipeline_count = 0;
   return { brand: BRAND, view: 'month', month, month_start: from, month_end: to, today, rows, totals, targets: targetsNow(),
-    entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
+    quote: quoteFor(today), entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
 }
 
 function dayRow(uid, day) {

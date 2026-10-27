@@ -22,6 +22,7 @@
   <div id="totals" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
  </div>
  <div class="card" id="dailyCard"><h2>Daily this week</h2><p class="muted" id="dailyNote"></p><div class="scroll"><table id="daily"></table></div></div>
+ <div class="card qotd" id="quoteCard"><h2>Quote of the day</h2><p id="quoteText"></p><div class="by" id="quoteBy"></div></div>
  <div class="card" id="lbCard"><h2>Leaderboard</h2><p class="muted">Score: 30 per appraisal done, 20 per appraisal booked, and 1 each for calls, knocks and letter drops.</p><div id="lb"></div></div>
  <div class="card"><h3 id="missH">Haven't entered numbers this week</h3><div id="missing" class="muted"></div></div>
  <div class="card"><h2>Per agent</h2><p class="muted">Small numbers show the change vs the week before. Tap a name for that agent's history.</p>
@@ -60,6 +61,7 @@ async function load(){const q=new URLSearchParams({view:curView});if(curPeriod)q
  $('#csvRoll').href=month?'/api/admin/export.csv?grain=month&month='+D.month:'/api/admin/export.csv?grain=week&week='+D.week;$('#csvRoll').textContent=month?'Month totals CSV':'Week totals CSV';
  const prev=month?'Last month':'Last week';
  $('#sub').textContent=month?`${fmtMonth(D.month)} · Numbers in ${D.entered_count}/${D.agent_count} agents`:`Week ${fmtWeek(D.week,D.week_end)} · Numbers in ${D.entered_count}/${D.agent_count} agents · Pipeline ${D.totals.pipeline_count} addresses`;
+ if(D.quote){$('#quoteText').textContent='“'+D.quote.text+'”';$('#quoteBy').textContent=D.quote.author}
  $('#totals').innerHTML=M.map(m=>{const tg=D.targets_apply?(D.targets[m]||0):0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat s-${m}"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m]||0)}</b><span>${prev} ${D.last_totals[m]||0}${tg?' · target '+tg:''}</span>${tg?`<div class="bar s-${m}" style="margin-top:6px"><i style="width:${p}%"></i></div>`:''}</div>`}).join('')+(month?'':`<div class="stat s-pipe"><span>Pipeline now</span><b>${D.totals.pipeline_count}</b><span>addresses on file</span></div>`);
  $('#missH').textContent=month?"Haven't entered numbers this month":"Haven't entered numbers this week";
  $('#missing').innerHTML=D.missing.length?D.missing.map(esc).join(', '):'Everyone has entered numbers ✓';

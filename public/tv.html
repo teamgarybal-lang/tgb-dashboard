@@ -41,13 +41,17 @@ tr.c-appr_done td.lab{color:var(--c-appr_done)}tr.c-appr_booked td.lab{color:var
 .lb.silver{background:linear-gradient(90deg,#F7F9FC,#D5DEE8);color:#1C2836}.lb.silver .sm{color:#526173}
 .lb.bronze{background:linear-gradient(90deg,#FFE0C2,#E0A36A);color:#3D2612}.lb.bronze .sm{color:#6D4B2E}
 .empty{color:var(--mut);font-style:italic;font-size:18px}
+.quote{margin-top:auto;padding-top:18px;border-top:1px solid rgba(255,255,255,.1)}
+.quote .kicker{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#8FD9F8;font-weight:800;margin-bottom:10px}
+.quote p{margin:0;font-size:30px;line-height:1.28;font-style:italic;font-weight:650;letter-spacing:-.02em}
+.quote .by{margin-top:12px;font-size:18px;font-weight:800;letter-spacing:.04em;color:#F5C451}
 #err{position:fixed;bottom:10px;right:16px;color:#FCA5A5;font-size:14px}
 </style></head><body>
 <div class="top"><div class="brand"><img src="/static/logo.png" alt="Harcourts TGB Group"></div><div class="meta"><b id="clock"></b><span id="wk"></span></div></div>
 <div class="main">
  <div class="panel"><h2>Team this week</h2><div id="metrics"></div>
   <div class="big"><div><span>Numbers in</span><b id="inn">–</b></div><div><span>Pipeline</span><b id="pipe">–</b></div></div></div>
- <div class="panel"><h2>Daily this week</h2><div class="cap">Team total for each day, Monday to Sunday</div><div id="daily"></div></div>
+ <div class="panel"><h2>Daily this week</h2><div class="cap">Team total for each day, Monday to Sunday</div><div id="daily"></div><div class="quote" id="quote"></div></div>
  <div class="panel"><h2>Leaderboard</h2><div class="cap">30 per appraisal done · 20 per booked · calls, knocks and drops count as 1</div><div id="lb"></div></div>
 </div>
 <div id="err"></div>
@@ -68,6 +72,8 @@ async function load(){try{
  const days=d.daily||[];
  document.getElementById('daily').innerHTML=`<table><tr><th class="lab"></th>${days.map((day,i)=>`<th class="${day.day===d.today?'today':''}">${DOW[i]}</th>`).join('')}</tr>`+
   M.map(m=>`<tr class="c-${m}"><td class="lab">${esc(d.labels[m])}</td>${days.map(day=>`<td class="${day.day===d.today?'today':''}${day.day>d.today?' future':''}">${day[m]||0}</td>`).join('')}</tr>`).join('')+'</table>';
+ const q=d.quote||{};
+ document.getElementById('quote').innerHTML=q.text?`<div class="kicker">Quote of the day</div><p>“${esc(q.text)}”</p><div class="by">${esc(q.author)}</div>`:'';
  const lb=[...d.rows].filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,8);
  const medal=['gold','silver','bronze'];
  document.getElementById('lb').innerHTML=lb.length?lb.map((r,i)=>`<div class="lb ${medal[i]||''}"><div class="rk">${i+1}</div><div><div class="n">${esc(r.name)}</div><div class="sm">${r.appr_done} done · ${r.appr_booked} booked · ${r.cold_calls} calls · ${r.door_knocks} knocks · ${r.letter_drops} drops</div></div><div class="sc">${r.score}</div></div>`).join(''):'<div class="empty">No numbers in yet this week</div>';
