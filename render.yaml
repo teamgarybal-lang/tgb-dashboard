@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: tgb-dashboard
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATA_DIR
+        value: /var/data
+      - key: ADMIN_INITIAL_PASSWORD
+        sync: false
+    disk:
+      name: tgb-data
+      mountPath: /var/data
+      sizeGB: 1
