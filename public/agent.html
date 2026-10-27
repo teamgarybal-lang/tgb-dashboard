@@ -5,9 +5,15 @@
 <div class="wrap">
  <div id="pwb" class="banner" style="display:none">You're using a temporary password. <a href="#" onclick="changePw();return false">Set your own password</a>.</div>
  <div class="card">
-  <div class="row" style="justify-content:space-between"><h2 style="margin:0">This week</h2><span id="flag" class="pill off">Not checked in today</span></div>
-  <p class="muted" style="margin:6px 0 0">Tap +1 as you go, or type a total. Totals save automatically.</p>
+  <div class="row" style="justify-content:space-between"><h2 id="dayTitle" style="margin:0">Today</h2><span id="flag" class="pill off">Not checked in today</span></div>
+  <select id="day" style="margin-top:8px"></select>
+  <p class="muted" style="margin:6px 0 0">Tap +1 as you go, or type that day's total. You can fill in or correct the last 14 days.</p>
   <div id="metrics"></div>
+ </div>
+ <div class="card">
+  <h2>Your totals</h2>
+  <p class="muted" id="rollNote"></p>
+  <div class="scroll"><table id="mine"></table></div>
  </div>
  <div class="card">
   <h2>Today I'm working on</h2>
@@ -34,18 +40,25 @@
 </div>
 <script src="/static/common.js"></script>
 <script>
-const M=['door_knocks','cold_calls','appr_booked','appr_done'];let L={},timers={};
-function renderMetrics(e){$('#metrics').innerHTML=M.map(m=>`<div class="metric"><div><div class="name">${L[m]}</div><div class="sub">this week</div></div>
- <div class="ctl"><button class="minus" data-m="${m}" data-d="-1" aria-label="minus one">−</button><input type="number" min="0" inputmode="numeric" id="v_${m}" value="${e[m]}"><button class="tap" data-m="${m}" data-d="1">+1</button></div></div>`).join('');
- document.querySelectorAll('#metrics button').forEach(b=>b.onclick=async()=>{const r=await api('/api/me/inc',{body:{field:b.dataset.m,delta:+b.dataset.d}});$('#v_'+b.dataset.m).value=r.entry[b.dataset.m];setFlag(true);loadTeam()});
- M.forEach(m=>$('#v_'+m).oninput=ev=>{clearTimeout(timers[m]);timers[m]=setTimeout(async()=>{await api('/api/me/entry',{body:{[m]:ev.target.value}});setFlag(true);loadTeam()},700)})}
-function setFlag(on){const f=$('#flag');f.className='pill '+(on?'on':'off');f.textContent=on?'Working today ✓':'Not checked in today'}
-function renderTeam(t){$('#inCount').textContent=`Numbers in: ${t.entered_count}/${t.agent_count} agents · Pipeline: ${t.totals.pipeline_count} listings`;
+const M=['appr_done','appr_booked','cold_calls','door_knocks','letter_drops'];let L={},timers={},currentDay='',today='';
+const fmtDay=d=>new Date(d+'T00:00:00').toLocaleDateString('en-NZ',{weekday:'short',day:'numeric',month:'short'});
+const fmtMonth=m=>{const [y,mo]=m.split('-').map(Number);return new Date(Date.UTC(y,mo-1,1)).toLocaleDateString('en-NZ',{month:'long',year:'numeric',timeZone:'UTC'})};
+function renderMetrics(e){$('#metrics').innerHTML=M.map(m=>`<div class="metric"><div><div class="name">${L[m]}</div><div class="sub">this day</div></div>
+ <div class="ctl"><button class="minus" data-m="${m}" data-d="-1" aria-label="minus one">−</button><input type="number" min="0" inputmode="numeric" id="v_${m}" value="${e[m]||0}"><button class="tap" data-m="${m}" data-d="1">+1</button></div></div>`).join('');
+ document.querySelectorAll('#metrics button').forEach(b=>b.onclick=async()=>{const r=await api('/api/me/inc',{body:{field:b.dataset.m,delta:+b.dataset.d,day:currentDay}});$('#v_'+b.dataset.m).value=r.entry[b.dataset.m];if(currentDay===today)setFlag(true);loadTeam()});
+ M.forEach(m=>$('#v_'+m).oninput=ev=>{clearTimeout(timers[m]);timers[m]=setTimeout(async()=>{await api('/api/me/entry',{body:{day:currentDay,[m]:ev.target.value}});if(currentDay===today)setFlag(true);loadTeam()},700)})}
+function setFlag(on){const f=$('#flag');if(!f)return;f.className='pill '+(on?'on':'off');f.textContent=on?'Working today ✓':'Not checked in today'}
+function renderMine(d){$('#rollNote').textContent=`Week ${fmtWeek(d.week.week,d.week.week_end)} · ${fmtMonth(d.month.month)}`;
+ $('#mine').innerHTML='<tr><th>Metric</th><th class="n">This week</th><th class="n">This month</th></tr>'+M.map(m=>`<tr><td>${esc(L[m])}</td><td class="n">${d.week[m]||0}</td><td class="n">${d.month[m]||0}</td></tr>`).join('')}
+function renderTeam(t){$('#inCount').textContent=`Entered this week: ${t.entered_count}/${t.agent_count} agents · Pipeline: ${t.totals.pipeline_count} listings`;
  $('#team').innerHTML=M.map(m=>{const tg=t.targets[m]||0,v=t.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div style="margin:10px 0"><div class="row" style="justify-content:space-between"><span>${L[m]}</span><b>${v}${tg?' / '+tg:''}</b></div><div class="bar"><i style="width:${p}%"></i></div></div>`}).join('')}
-async function loadTeam(){const d=await api('/api/me');renderTeam(d.team)}
-async function load(){const d=await api('/api/me');L=d.labels;$('#nm').textContent=d.user.name;$('#wk').textContent='Week '+fmtWeek(d.team.week,d.team.week_end);
- if(d.user.must_change)$('#pwb').style.display='block';renderMetrics(d.entry);setFlag(d.entry.working_today);$('#status').value=d.entry.status||'';$('#pc').value=d.entry.pipeline_count;$('#pn').value=d.entry.pipeline_note||'';renderTeam(d.team);
- const h=await api('/api/me/history');$('#hist').innerHTML='<tr><th>Week</th><th class="n">Knocks</th><th class="n">Calls</th><th class="n">Appr bk</th><th class="n">Appr done</th></tr>'+h.map(r=>`<tr><td>${esc(r.week_start)}</td>${M.map(m=>`<td class="n">${r[m]}</td>`).join('')}</tr>`).join('')}
+async function loadTeam(){const d=await api('/api/me'+(currentDay?'?day='+encodeURIComponent(currentDay):''));renderTeam(d.team);renderMine(d)}
+async function load(){const d=await api('/api/me'+(currentDay?'?day='+encodeURIComponent(currentDay):''));L=d.labels;today=d.today;currentDay=d.day;$('#nm').textContent=d.user.name;$('#wk').textContent='Week '+fmtWeek(d.team.week,d.team.week_end);
+ $('#dayTitle').textContent=d.day===d.today?'Today':fmtDay(d.day);
+ $('#day').innerHTML=d.recent_days.map(day=>`<option value="${day}" ${day===d.day?'selected':''}>${day===d.today?'Today · ':''}${fmtDay(day)}</option>`).join('');
+ if(d.user.must_change)$('#pwb').style.display='block';renderMetrics(d.entry);setFlag(!!d.entry.working_today);renderMine(d);$('#status').value=d.entry.status||'';$('#pc').value=d.entry.pipeline_count;$('#pn').value=d.entry.pipeline_note||'';renderTeam(d.team);
+ const h=await api('/api/me/history');$('#hist').innerHTML='<tr><th>Week</th><th class="n">Done</th><th class="n">Booked</th><th class="n">Calls</th><th class="n">Knocks</th><th class="n">Drops</th></tr>'+h.map(r=>`<tr><td>${esc(r.week_start)}</td>${M.map(m=>`<td class="n">${r[m]}</td>`).join('')}</tr>`).join('')}
+$('#day').onchange=e=>{currentDay=e.target.value;load()};
 $('#saveStatus').onclick=async()=>{await api('/api/me/entry',{body:{status:$('#status').value}});setFlag(true);$('#stmsg').textContent='Status updated';setTimeout(()=>$('#stmsg').textContent='',2500)};
 $('#savePipe').onclick=async()=>{await api('/api/me/entry',{body:{pipeline_count:$('#pc').value,pipeline_note:$('#pn').value}});setFlag(true);$('#pmsg').textContent='Pipeline saved';setTimeout(()=>$('#pmsg').textContent='',2500);loadTeam()};
 load();setInterval(loadTeam,60000);
