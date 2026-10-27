@@ -1,62 +1,108 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Admin · Harcourts TGB Group</title><link rel="stylesheet" href="/static/app.css"><meta name="theme-color" content="#0B1F3A"></head>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Admin · Harcourts TGB Group</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TGB Dashboard">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/app.css"></head>
 <body>
 <header class="top"><img src="/static/logo.png" alt="Harcourts TGB Group"><div class="who"><b>Admin</b> · <a href="#" onclick="logout();return false">Sign out</a></div></header>
 <div class="wrap wide">
  <div id="pwb" class="banner" style="display:none">You're using the temporary admin password. <a href="#" onclick="changePw();return false">Set your own password</a>.</div>
  <div class="card"><div class="row" style="justify-content:space-between">
   <h2 style="margin:0">Team numbers</h2>
-  <div class="row"><select id="week" style="width:auto"></select>
-  <a class="btn sec" id="csv" href="#">Export week CSV</a><a class="btn sec" href="/api/admin/export.csv?all=1">Export all weeks</a></div></div>
+  <div class="row"><select id="view" style="width:auto"><option value="week">Week</option><option value="month">Month</option></select><select id="period" style="width:auto"></select>
+  <a class="btn sec" id="csvDay" href="#">Daily CSV</a><a class="btn sec" id="csvRoll" href="#">Week totals CSV</a><a class="btn sec" id="csvAll" href="/api/admin/export.csv?grain=day&all=1">All daily CSV</a></div></div>
   <p class="muted" id="sub"></p>
   <div id="totals" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
  </div>
- <div class="card"><h3>Haven't entered numbers this week</h3><div id="missing" class="muted"></div></div>
+ <div class="card" id="dailyCard"><h2>Daily this week</h2><p class="muted" id="dailyNote"></p><div class="scroll"><table id="daily"></table></div></div>
+ <div class="card qotd" id="quoteCard"><h2>Quote of the day</h2><p id="quoteText"></p><div class="by" id="quoteBy"></div></div>
+ <div class="card" id="lbCard"><h2>Leaderboard</h2><p class="muted">Score: 30 per appraisal done, 20 per appraisal booked, and 1 each for calls, knocks and letter drops.</p><div id="lb"></div></div>
+ <div class="card"><h3 id="missH">Haven't entered numbers this week</h3><div id="missing" class="muted"></div></div>
  <div class="card"><h2>Per agent</h2><p class="muted">Small numbers show the change vs the week before. Tap a name for that agent's history.</p>
   <div class="scroll"><table id="tbl"></table></div></div>
  <div class="card" id="histCard" style="display:none"><div class="row" style="justify-content:space-between"><h2 id="histTitle" style="margin:0"></h2><button class="sec small" onclick="histCard.style.display='none'">Close</button></div><div class="scroll"><table id="histTbl"></table></div></div>
- <div class="card"><h2>Agents</h2>
+ <div class="card"><div class="row" style="justify-content:space-between">
+  <h2 style="margin:0">Pipeline</h2>
+  <div class="row"><select id="pipeAgent" style="width:auto"><option value="">All agents</option></select><a class="btn sec" id="pipeCsv" href="/api/admin/pipeline.csv">Pipeline CSV</a></div></div>
+  <p class="muted">Every agent's addresses. Agents only see their own. The TV shows the count, never the address.</p>
+  <div id="pipeBoard"></div>
+ </div>
+ <div class="card"><h2>Users</h2>
   <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
    <div><label>Name</label><input id="nName"></div><div><label>Email</label><input id="nEmail" type="email"></div>
+   <div><label>Role</label><select id="nRole"><option value="agent" selected>Agent</option><option value="admin">Admin</option></select></div>
    <div><label>Temporary password</label><div class="row" style="flex-wrap:nowrap"><input id="nPw"><button class="sec small" onclick="nPw.value=genPw()">Generate</button></div></div>
   </div>
-  <button style="margin-top:12px" onclick="addAgent()">Add agent</button><div class="err" id="addErr"></div><div class="okmsg" id="addOk"></div>
+  <button style="margin-top:12px" onclick="addUser()">Add user</button><div class="err" id="addErr"></div><div class="okmsg" id="addOk"></div>
   <div class="scroll" style="margin-top:10px"><table id="users"></table></div>
  </div>
- <div class="card"><h2>Weekly team targets</h2><p class="muted">Used for the progress bars on the TV and agent screens.</p>
+ <div class="card"><h2>Weekly team targets</h2><p class="muted">Used for the progress bars on the TV and agent screens. They apply to weekly totals only. Letter / flyer drops starts at 500 until you change it.</p>
   <div id="targets" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
   <button style="margin-top:12px" onclick="saveTargets()">Save targets</button><span class="okmsg" id="tOk" style="margin-left:10px"></span></div>
- <div class="card"><h2>Office TV screen</h2><p class="muted">Open this link on the office TV. It needs no login. Anyone with the link can see the TV screen, so regenerate the key if it gets shared.</p>
-  <input id="tvurl" readonly onclick="this.select()"><div class="row" style="margin-top:10px"><a class="btn" id="tvopen" target="_blank">Open TV view</a><button class="danger" onclick="regen()">Regenerate key</button></div></div>
+ <div class="card" id="tvCard"><h2>Office TV screen</h2><p class="muted">Open this link on the office TV, or type the code with the remote. It needs no login. A new code stops the old link and the TV will ask again.</p>
+  <div class="tvcode" id="tvcode"></div>
+  <input id="tvurl" readonly onclick="this.select()"><div class="row" style="margin-top:10px"><a class="btn" id="tvopen" target="_blank">Open TV view</a><button class="danger" onclick="regen()">New TV code</button></div></div>
 </div>
 <script src="/static/common.js"></script>
 <script>
-const M=['door_knocks','cold_calls','appr_booked','appr_done'];let D,curWeek='';
+const M=['appr_done','appr_booked','cold_calls','door_knocks','letter_drops'];let D,curView='week',curPeriod='';
+const fmtMonth=m=>{const [y,mo]=m.split('-').map(Number);return new Date(Date.UTC(y,mo-1,1)).toLocaleDateString('en-NZ',{month:'long',year:'numeric',timeZone:'UTC'})};
 const genPw=()=>{const a='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from(crypto.getRandomValues(new Uint8Array(10)),x=>a[x%a.length]).join('')};
 const delta=(a,b)=>{const d=a-b;return d>0?`<span class="up">▲${d}</span>`:d<0?`<span class="down">▼${-d}</span>`:''};
-async function load(){D=await api('/api/admin/summary'+(curWeek?'?week='+curWeek:''));curWeek=D.week;const L=D.labels;
- $('#week').innerHTML=D.weeks.map(w=>`<option value="${w}" ${w===D.week?'selected':''}>${fmtWeek(w,new Date(Date.parse(w+'T00:00:00Z')+6*864e5).toISOString().slice(0,10))}</option>`).join('');
- $('#csv').href='/api/admin/export.csv?week='+D.week;
- $('#sub').textContent=`Week ${fmtWeek(D.week,D.week_end)} · Numbers in ${D.entered_count}/${D.agent_count} agents · Pipeline ${D.totals.pipeline_count} listings`;
- $('#totals').innerHTML=M.map(m=>{const tg=D.targets[m]||0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m])}</b><span>Last week ${D.last_totals[m]}${tg?' · target '+tg:''}</span><div class="bar" style="margin-top:6px"><i style="width:${p}%"></i></div></div>`}).join('')+`<div class="stat"><span>Pipeline (30–90 days)</span><b>${D.totals.pipeline_count}</b><span>listings expected</span></div>`;
+async function load(){const q=new URLSearchParams({view:curView});if(curPeriod)q.set(curView==='month'?'month':'week',curPeriod);D=await api('/api/admin/summary?'+q);curView=D.view;curPeriod=D.view==='month'?D.month:D.week;const L=D.labels;const month=D.view==='month';
+ $('#view').value=D.view;
+ $('#period').innerHTML=month?D.months.map(m=>`<option value="${m}" ${m===D.month?'selected':''}>${fmtMonth(m)}</option>`).join(''):D.weeks.map(w=>`<option value="${w}" ${w===D.week?'selected':''}>${fmtWeek(w,new Date(Date.parse(w+'T00:00:00Z')+6*864e5).toISOString().slice(0,10))}</option>`).join('');
+ $('#csvDay').href=month?'/api/admin/export.csv?grain=day&month='+D.month:'/api/admin/export.csv?grain=day&week='+D.week;
+ $('#csvRoll').href=month?'/api/admin/export.csv?grain=month&month='+D.month:'/api/admin/export.csv?grain=week&week='+D.week;$('#csvRoll').textContent=month?'Month totals CSV':'Week totals CSV';
+ const prev=month?'Last month':'Last week';
+ $('#sub').textContent=month?`${fmtMonth(D.month)} · Numbers in ${D.entered_count}/${D.agent_count} agents`:`Week ${fmtWeek(D.week,D.week_end)} · Numbers in ${D.entered_count}/${D.agent_count} agents · Pipeline ${D.totals.pipeline_count} addresses`;
+ if(D.quote){$('#quoteText').textContent='“'+D.quote.text+'”';$('#quoteBy').textContent=D.quote.author}
+ $('#totals').innerHTML=M.map(m=>{const tg=D.targets_apply?(D.targets[m]||0):0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat s-${m}"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m]||0)}</b><span>${prev} ${D.last_totals[m]||0}${tg?' · target '+tg:''}</span>${tg?`<div class="bar s-${m}" style="margin-top:6px"><i style="width:${p}%"></i></div>`:''}</div>`}).join('')+(month?'':`<div class="stat s-pipe"><span>Pipeline now</span><b>${D.totals.pipeline_count}</b><span>addresses on file</span></div>`);
+ $('#missH').textContent=month?"Haven't entered numbers this month":"Haven't entered numbers this week";
  $('#missing').innerHTML=D.missing.length?D.missing.map(esc).join(', '):'Everyone has entered numbers ✓';
- $('#tbl').innerHTML=`<tr><th>Agent</th><th>Today</th>${M.map(m=>`<th class="n">${L[m]}</th>`).join('')}<th class="n">Pipeline</th><th>Status / pipeline note</th></tr>`+
-  D.rows.map(r=>`<tr><td><a href="#" onclick="hist(${r.id},'${esc(r.name).replace(/'/g,'')}');return false">${esc(r.name)}</a></td><td>${r.working_today?'<span class="pill on">Working</span>':'<span class="pill off">—</span>'}</td>${M.map(m=>`<td class="n">${r[m]} ${delta(r[m],r.last[m])}</td>`).join('')}<td class="n">${r.pipeline_count}</td><td class="muted">${esc(r.status)}${r.status&&r.pipeline_note?'<br>':''}${esc(r.pipeline_note)}</td></tr>`).join('')+
-  `<tr style="font-weight:700"><td>Team</td><td></td>${M.map(m=>`<td class="n">${D.totals[m]}</td>`).join('')}<td class="n">${D.totals.pipeline_count}</td><td></td></tr>`;
+ const blurb=$('#tbl').closest('.card').querySelector('p');if(blurb)blurb.textContent=month?'Small numbers show the change vs the month before. Tap a name for that agent\'s days.':'Small numbers show the change vs the week before. Tap a name for that agent\'s days.';
+ $('#tbl').innerHTML=`<tr><th>Agent</th>${month?'<th>Entered</th>':''}${M.map(m=>`<th class="n">${L[m]}</th>`).join('')}${month?'':'<th class="n">Pipeline now</th>'}</tr>`+
+  D.rows.map(r=>`<tr><td><a href="#" onclick="hist(${r.id},'${esc(r.name).replace(/'/g,'')}');return false">${esc(r.name)}</a></td>${month?`<td>${r.entered?'<span class="pill on">Yes</span>':'<span class="pill off">No</span>'}</td>`:''}${M.map(m=>`<td class="n">${r[m]} ${delta(r[m],(r.last||{})[m]||0)}</td>`).join('')}${month?'':`<td class="n">${r.pipeline_count}</td>`}</tr>`).join('')+
+  `<tr style="font-weight:700"><td>Team</td>${month?'<td></td>':''}${M.map(m=>`<td class="n">${D.totals[m]}</td>`).join('')}${month?'':`<td class="n">${D.totals.pipeline_count}</td>`}</tr>`;
+ const DOW=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+ $('#dailyCard').style.display=month?'none':'';$('#lbCard').style.display=month?'none':'';
+ if(!month){$('#dailyNote').textContent=`Team totals each day, ${fmtWeek(D.week,D.week_end)}.`;
+  $('#daily').innerHTML=`<tr><th>Metric</th>${(D.daily||[]).map((d,i)=>`<th class="n${d.day===D.today?' today':''}">${DOW[i]}</th>`).join('')}</tr>`+M.map(m=>`<tr class="s-${m}"><td>${esc(L[m])}</td>${(D.daily||[]).map(d=>`<td class="n${d.day===D.today?' today':''}${d.day>D.today?' future':''}">${d[m]||0}</td>`).join('')}</tr>`).join('');
+  const lb=[...D.rows].filter(r=>r.score>0).sort((a,b)=>b.score-a.score);const medal=['gold','silver','bronze'];
+  $('#lb').innerHTML=lb.length?lb.map((r,i)=>`<div class="rank ${medal[i]||''}"><div class="rk">${i+1}</div><div><b>${esc(r.name)}</b><div class="muted">${r.appr_done} done · ${r.appr_booked} booked · ${r.cold_calls} calls · ${r.door_knocks} knocks · ${r.letter_drops} drops</div></div><div class="sc">${r.score}</div></div>`).join(''):'<p class="muted">No numbers in yet this week.</p>';}
+ loadPipeline();
  $('#targets').innerHTML=M.map(m=>`<div><label>${L[m]}</label><input type="number" min="0" id="t_${m}" value="${D.targets[m]}"></div>`).join('');
- const u=`${location.origin}/tv?key=${D.tv_key}`;$('#tvurl').value=u;$('#tvopen').href=u;
+ const u=`${location.origin}/tv/${D.tv_key}`;$('#tvcode').textContent=D.tv_key;$('#tvurl').value=u;$('#tvopen').href=u;
  loadUsers()}
-async function loadUsers(){const us=await api('/api/admin/users');const me=us.find(x=>x.role==='admin'&&x.email.toLowerCase()==='gary.bal@harcourts.co.nz');if(me&&me.must_change)$('#pwb').style.display='block';
- $('#users').innerHTML='<tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr>'+us.map(x=>`<tr><td>${esc(x.name)}${x.role==='admin'?' <span class="pill on">admin</span>':''}</td><td>${esc(x.email)}</td><td>${x.active?'Active':'Inactive'}${x.must_change?' · temp password':''}</td><td>${x.role==='admin'?'':`<div class="row"><button class="sec small" onclick="resetPw(${x.id})">Reset password</button><button class="sec small" onclick="setActive(${x.id},${x.active?0:1})">${x.active?'Deactivate':'Activate'}</button><button class="danger small" onclick="del(${x.id},'${esc(x.name).replace(/'/g,'')}')">Delete</button></div>`}</td></tr>`).join('')}
-async function addAgent(){$('#addErr').textContent='';$('#addOk').textContent='';try{const pw=nPw.value||genPw();await api('/api/admin/users',{body:{name:nName.value,email:nEmail.value,password:pw}});
- $('#addOk').textContent=`Added. Give ${nName.value} this to sign in: ${location.origin}/login · ${nEmail.value} · temporary password ${pw}`;nName.value=nEmail.value=nPw.value='';load()}catch(e){$('#addErr').textContent=e.message}}
+async function loadPipeline(){const users=await api('/api/admin/users');const agents=users.filter(u=>u.role==='agent');const cur=$('#pipeAgent').value;
+ $('#pipeAgent').innerHTML='<option value="">All agents</option>'+agents.map(a=>`<option value="${a.id}">${esc(a.name)}${a.active?'':' (inactive)'}</option>`).join('');
+ $('#pipeAgent').value=agents.some(a=>String(a.id)===cur)?cur:'';
+ const q=$('#pipeAgent').value?'?user_id='+encodeURIComponent($('#pipeAgent').value):'';
+ $('#pipeCsv').href='/api/admin/pipeline.csv'+q;
+ const d=await api('/api/admin/pipeline'+q);
+ $('#pipeBoard').innerHTML=d.agents.length?d.agents.map(a=>`<h3 style="margin-top:14px">${esc(a.name)}${a.active?'':' <span class="pill off">inactive</span>'} <span class="muted">${a.count}</span></h3>`+(a.entries.length?a.entries.map(e=>`<div class="metric"><div><div class="name">${esc(e.address)}</div><div class="sub">${esc(e.stage||'No stage')}${e.notes?' · '+esc(e.notes):''}</div></div></div>`).join(''):'<p class="muted">No addresses yet.</p>')).join(''):'<p class="muted">No agents yet.</p>'}
+$('#pipeAgent').onchange=()=>loadPipeline();
+async function loadUsers(){const us=await api('/api/admin/users');const me=us.find(x=>D.me&&Number(x.id)===Number(D.me.id));$('#pwb').style.display=me&&me.must_change?'block':'none';
+ const actions=x=>me&&Number(x.id)===Number(me.id)?'<span class="muted">Signed in</span>':`<div class="row"><button class="sec small" onclick="resetPw(${x.id})">Reset password</button><button class="sec small" onclick="setActive(${x.id},${x.active?0:1})">${x.active?'Deactivate':'Activate'}</button><button class="danger small" onclick="del(${x.id},'${esc(x.name).replace(/'/g,'')}')">Delete</button></div>`;
+ $('#users').innerHTML='<tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr>'+us.map(x=>`<tr><td>${esc(x.name)}${x.role==='admin'?' <span class="pill on">admin</span>':''}</td><td>${esc(x.email)}</td><td>${x.active?'Active':'Inactive'}${x.must_change?' · temp password':''}</td><td>${actions(x)}</td></tr>`).join('')}
+async function addUser(){$('#addErr').textContent='';$('#addOk').textContent='';try{const pw=nPw.value||genPw();const role=nRole.value==='admin'?'admin':'agent';await api('/api/admin/users',{body:{name:nName.value,email:nEmail.value,password:pw,role}});
+ $('#addOk').textContent=`Added. Give ${nName.value} this to sign in: ${location.origin}/login · ${nEmail.value} · temporary password ${pw}`;nName.value=nEmail.value=nPw.value='';nRole.value='agent';load()}catch(e){$('#addErr').textContent=e.message}}
 async function resetPw(id){const pw=prompt('New temporary password (6+ characters):',genPw());if(!pw)return;try{await api(`/api/admin/users/${id}/reset`,{body:{password:pw}});alert('Password reset. New temporary password: '+pw);loadUsers()}catch(e){alert(e.message)}}
-async function setActive(id,a){await api(`/api/admin/users/${id}/active`,{body:{active:!!a}});load()}
-async function del(id,n){if(!confirm(`Delete ${n} and all their numbers? This can't be undone. (Deactivate keeps their history.)`))return;await api(`/api/admin/users/${id}`,{method:'DELETE'});load()}
+async function setActive(id,a){try{await api(`/api/admin/users/${id}/active`,{body:{active:!!a}});load()}catch(e){alert(e.message)}}
+async function del(id,n){if(!confirm(`Delete ${n} and all their numbers? This can't be undone. (Deactivate keeps their history.)`))return;try{await api(`/api/admin/users/${id}`,{method:'DELETE'});load()}catch(e){alert(e.message)}}
 async function saveTargets(){const b={};M.forEach(m=>b[m]=$('#t_'+m).value);await api('/api/admin/targets',{body:b});$('#tOk').textContent='Saved';setTimeout(()=>$('#tOk').textContent='',2000);load()}
-async function regen(){if(!confirm('Make a new TV key? The old TV link will stop working.'))return;await api('/api/admin/tvkey',{body:{}});load()}
-async function hist(id,n){const h=await api(`/api/admin/agent/${id}/history`);$('#histTitle').textContent=n+' – weekly history';histCard.style.display='block';
- $('#histTbl').innerHTML=`<tr><th>Week</th>${M.map(m=>`<th class="n">${D.labels[m]}</th>`).join('')}<th class="n">Pipeline</th><th>Note</th></tr>`+h.map(r=>`<tr><td>${esc(r.week_start)}</td>${M.map(m=>`<td class="n">${r[m]}</td>`).join('')}<td class="n">${r.pipeline_count}</td><td class="muted">${esc(r.pipeline_note)}</td></tr>`).join('');histCard.scrollIntoView({behavior:'smooth'})}
-$('#week').onchange=e=>{curWeek=e.target.value;load()};
-load();setInterval(()=>{if(document.visibilityState==='visible'&&curWeek===D?.weeks?.[0]&&!document.activeElement.matches('input,select,textarea'))load()},30000);
+async function regen(){if(!confirm('Make a new TV code? The old link will stop working and the office TV will need the new code.'))return;await api('/api/admin/tvkey',{body:{}});load()}
+async function hist(id,n){const h=await api(`/api/admin/agent/${id}/history`);$('#histTitle').textContent=n+' – daily history';histCard.style.display='block';
+ const fmt=d=>new Date(d+'T00:00:00').toLocaleDateString('en-NZ',{weekday:'short',day:'numeric',month:'short'});
+ $('#histTbl').innerHTML=`<tr><th>Day</th>${M.map(m=>`<th class="n">${D.labels[m]}</th>`).join('')}</tr>`+(h.length?h.map(r=>`<tr><td>${esc(fmt(r.day))}</td>${M.map(m=>`<td class="n">${r[m]||0}</td>`).join('')}</tr>`).join(''):'<tr><td class="muted" colspan="6">No daily numbers yet</td></tr>');histCard.scrollIntoView({behavior:'smooth'})}
+$('#view').onchange=e=>{curView=e.target.value;curPeriod='';load()};
+$('#period').onchange=e=>{curPeriod=e.target.value;load()};
+load();setInterval(()=>{const live=D?.view==='month'?curPeriod===D?.months?.[0]:curPeriod===D?.weeks?.[0];if(document.visibilityState==='visible'&&live&&!document.activeElement.matches('input,select,textarea'))load()},30000);
 </script></body></html>

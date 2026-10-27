@@ -11,9 +11,11 @@ const PORT = process.env.PORT || 3100;
 const TZ = 'Pacific/Auckland';
 const BRAND = 'Harcourts TGB Group';
 const DATA_DIR = process.env.DATA_DIR || __dirname;
+const DAY_WINDOW = 14; // today plus the previous 13 days can be filled in or corrected
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new Database(path.join(DATA_DIR, 'data.db'));
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL COLLATE NOCASE,
   pass_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'agent', active INTEGER NOT NULL DEFAULT 1,
@@ -26,14 +28,70 @@ CREATE TABLE IF NOT EXISTS entries(user_id INTEGER NOT NULL, week_start TEXT NOT
   last_day TEXT DEFAULT '', updated_at TEXT, PRIMARY KEY(user_id, week_start));
 CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, ts TEXT, field TEXT, value TEXT);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS day_entries(
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  door_knocks INTEGER NOT NULL DEFAULT 0,
+  cold_calls INTEGER NOT NULL DEFAULT 0,
+  appr_booked INTEGER NOT NULL DEFAULT 0,
+  appr_done INTEGER NOT NULL DEFAULT 0,
+  letter_drops INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT,
+  PRIMARY KEY(user_id, day));
+CREATE TABLE IF NOT EXISTS weekly_metric_migration(
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  week_start TEXT NOT NULL,
+  PRIMARY KEY(user_id, week_start));
+CREATE INDEX IF NOT EXISTS day_entries_day ON day_entries(day);
+CREATE TABLE IF NOT EXISTS pipeline_entries(
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  address TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  stage TEXT NOT NULL DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS pipeline_legacy_migration(
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE);
+CREATE INDEX IF NOT EXISTS pipeline_entries_user ON pipeline_entries(user_id);
 `);
 
-const METRICS = ['door_knocks', 'cold_calls', 'appr_booked', 'appr_done'];
-const LABELS = { door_knocks: 'Door knocks', cold_calls: 'Cold calls', appr_booked: 'Appraisals booked', appr_done: 'Appraisals done' };
+// Entry order on every screen. Score = appr_done*30 + appr_booked*20 + cold_calls + door_knocks + letter_drops.
+const METRICS = ['appr_done', 'appr_booked', 'cold_calls', 'door_knocks', 'letter_drops'];
+const LABELS = { appr_done: 'Appraisals done', appr_booked: 'Appraisals booked', cold_calls: 'Cold calls', door_knocks: 'Door knocks', letter_drops: 'Letter / flyer drops' };
+const DEFAULT_TARGETS = { appr_done: 30, appr_booked: 40, cold_calls: 1500, door_knocks: 1000, letter_drops: 500 };
 const getSetting = k => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? r.value : null; };
 const setSetting = (k, v) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, v);
-if (!getSetting('tv_key')) setSetting('tv_key', crypto.randomBytes(12).toString('base64url'));
-if (!getSetting('targets')) setSetting('targets', JSON.stringify({ door_knocks: 1000, cold_calls: 1500, appr_booked: 40, appr_done: 30 }));
+const TV_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o or 1/l/i
+const TV_CODE_RE = /^[abcdefghjkmnpqrstuvwxyz23456789]{6}$/;
+function newTvCode() {
+  let s = '';
+  while (s.length < 6) {
+    const b = crypto.randomBytes(1)[0];
+    if (b < TV_ALPHABET.length * 8) s += TV_ALPHABET[b % TV_ALPHABET.length];
+  }
+  return s;
+}
+const currentTv = getSetting('tv_key');
+if (!currentTv || !TV_CODE_RE.test(currentTv)) {
+  if (currentTv) console.log('Replacing the long TV link with a 6-character code. The old link no longer works.');
+  setSetting('tv_key', newTvCode());
+}
+if (!getSetting('targets')) setSetting('targets', JSON.stringify(DEFAULT_TARGETS));
+else {
+  const t = JSON.parse(getSetting('targets'));
+  let changed = false;
+  for (const m of METRICS) if (t[m] === undefined) { t[m] = DEFAULT_TARGETS[m]; changed = true; }
+  if (changed) setSetting('targets', JSON.stringify(t));
+}
+const targetsNow = () => JSON.parse(getSetting('targets'));
+// No monthly targets are stored. The TV scales the weekly target by the length of the calendar month.
+function monthTargetsFromWeekly(month, weekly) {
+  const days = Number(monthEnd(month).slice(8));
+  const targets = {};
+  METRICS.forEach(m => targets[m] = Math.round((weekly[m] || 0) * days / 7));
+  return { days, targets, basis: 'weekly × days ÷ 7' };
+}
 
 // Admin bootstrap
 const ADMIN_EMAIL = 'gary.bal@harcourts.co.nz';
@@ -42,6 +100,72 @@ if (!db.prepare('SELECT 1 FROM users WHERE email=?').get(ADMIN_EMAIL)) {
   db.prepare("INSERT INTO users(name,email,pass_hash,role,must_change) VALUES(?,?,?,'admin',1)").run('Gary Bal', ADMIN_EMAIL, bcrypt.hashSync(pw, 10));
   fs.writeFileSync(path.join(DATA_DIR, 'ADMIN_PASSWORD.txt'), `Admin login: ${ADMIN_EMAIL}\nTemporary password: ${pw}\n`, { mode: 0o600 });
 }
+
+// Copy each old weekly metric row onto that week's Monday once. letter_drops starts at 0.
+// appr_done, appr_booked, door_knocks and cold_calls are copied as stored. The entries row is left in place.
+function migrateWeeklyMetrics() {
+  const pending = db.prepare(`SELECT e.user_id, e.week_start, e.door_knocks, e.cold_calls, e.appr_booked, e.appr_done
+    FROM entries e WHERE NOT EXISTS (
+      SELECT 1 FROM weekly_metric_migration m WHERE m.user_id=e.user_id AND m.week_start=e.week_start)`).all();
+  const hasDay = db.prepare('SELECT 1 AS n FROM day_entries WHERE user_id=? AND day=?');
+  const insertDay = db.prepare(`INSERT INTO day_entries(user_id,day,door_knocks,cold_calls,appr_booked,appr_done,letter_drops,updated_at)
+    VALUES(?,?,?,?,?,?,0,datetime('now'))`);
+  const mark = db.prepare('INSERT INTO weekly_metric_migration(user_id,week_start) VALUES(?,?)');
+  db.transaction(rows => {
+    for (const e of rows) {
+      const any = e.door_knocks || e.cold_calls || e.appr_booked || e.appr_done;
+      if (any && !hasDay.get(e.user_id, e.week_start)) insertDay.run(e.user_id, e.week_start, e.door_knocks || 0, e.cold_calls || 0, e.appr_booked || 0, e.appr_done || 0);
+      mark.run(e.user_id, e.week_start);
+    }
+  })(pending);
+}
+migrateWeeklyMetrics();
+
+// Stages match the old "expected in 30–90 days" note. Blank is allowed.
+const PIPELINE_STAGES = ['', 'Expected', 'Appraisal booked', 'Pre-approved', 'Under offer'];
+function cleanAddress(v) {
+  const s = String(v ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').trim().replace(/\s+/g, ' ');
+  return s ? s.slice(0, 200) : null;
+}
+function cleanNotes(v) {
+  return String(v ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, 300);
+}
+function cleanStage(v) {
+  const s = String(v ?? '').trim();
+  return PIPELINE_STAGES.includes(s) ? s : null;
+}
+
+// Turn the carried-forward weekly pipeline figure into address rows, once per user.
+// The latest entries row wins. A note becomes the address. A count with no note becomes one
+// row that records the number. Older weekly snapshots stay on entries and are not copied again.
+function migratePipelineEntries() {
+  const users = db.prepare('SELECT id FROM users').all();
+  const marked = db.prepare('SELECT 1 AS n FROM pipeline_legacy_migration WHERE user_id=?');
+  const hasRows = db.prepare('SELECT 1 AS n FROM pipeline_entries WHERE user_id=? LIMIT 1');
+  const latest = db.prepare('SELECT pipeline_count, pipeline_note FROM entries WHERE user_id=? ORDER BY week_start DESC LIMIT 1');
+  const insert = db.prepare(`INSERT INTO pipeline_entries(user_id,address,notes,stage,created_at,updated_at)
+    VALUES(?,?,?,'',datetime('now'),datetime('now'))`);
+  const mark = db.prepare('INSERT INTO pipeline_legacy_migration(user_id) VALUES(?)');
+  db.transaction(list => {
+    for (const u of list) {
+      if (marked.get(u.id)) continue;
+      if (!hasRows.get(u.id)) {
+        const e = latest.get(u.id);
+        const note = String((e && e.pipeline_note) || '').trim().replace(/\s+/g, ' ');
+        const count = e ? (e.pipeline_count || 0) : 0;
+        if (note) {
+          const rest = note.slice(200).trim();
+          const countLine = count > 0 ? `Previously recorded as ${count} expected listings.` : '';
+          insert.run(u.id, note.slice(0, 200), [rest, countLine].filter(Boolean).join(' ').slice(0, 300));
+        } else if (count > 0) {
+          insert.run(u.id, `Recorded count only: ${count} listings (no address was saved)`.slice(0, 200), '');
+        }
+      }
+      mark.run(u.id);
+    }
+  })(users);
+}
+migratePipelineEntries();
 
 // ---- NZ date helpers ----
 function nzDay(d = new Date()) { // YYYY-MM-DD in NZ
@@ -55,23 +179,147 @@ function weekStartOf(day) { // Monday of the week containing day (YYYY-MM-DD)
   return dt.toISOString().slice(0, 10);
 }
 function addDays(day, n) { const [y, m, d] = day.split('-').map(Number); const dt = new Date(Date.UTC(y, m - 1, d + n)); return dt.toISOString().slice(0, 10); }
+const QUOTES = [
+  { text: 'Genius is one percent inspiration and ninety-nine percent perspiration.', author: 'Thomas Edison' },
+  { text: 'Opportunity is missed by most people because it is dressed in overalls and looks like work.', author: 'Thomas Edison' },
+  { text: 'Nothing in this world can take the place of persistence.', author: 'Calvin Coolidge' },
+  { text: 'Do what you can, with what you have, where you are.', author: 'Theodore Roosevelt' },
+  { text: 'Diligence is the mother of good luck.', author: 'Benjamin Franklin' },
+  { text: 'Well done is better than well said.', author: 'Benjamin Franklin' },
+  { text: 'Never leave that till tomorrow which you can do today.', author: 'Benjamin Franklin' },
+  { text: 'Lost time is never found again.', author: 'Benjamin Franklin' },
+  { text: 'He that is good for making excuses is seldom good for anything else.', author: 'Benjamin Franklin' },
+  { text: 'Success is to be measured not so much by the position that one has reached in life as by the obstacles which he has overcome.', author: 'Booker T. Washington' },
+  { text: 'Alone we can do so little; together we can do so much.', author: 'Helen Keller' },
+  { text: "Whether you think you can, or you think you can't, you're right.", author: 'Henry Ford' },
+  { text: 'A journey of a thousand miles begins with a single step.', author: 'Lao Tzu' },
+  { text: 'We are what we repeatedly do. Excellence, then, is not an act but a habit.', author: 'Will Durant' },
+  { text: 'People will forget what you said, people will forget what you did, but people will never forget how you made them feel.', author: 'Maya Angelou' },
+  { text: 'You can have everything in life you want, if you will just help enough other people get what they want.', author: 'Zig Ziglar' },
+  { text: 'There are no traffic jams on the extra mile.', author: 'Zig Ziglar' },
+  { text: 'Your attitude, not your aptitude, will determine your altitude.', author: 'Zig Ziglar' },
+  { text: 'Either you run the day, or the day runs you.', author: 'Jim Rohn' },
+  { text: 'Success is nothing more than a few simple disciplines, practiced every day.', author: 'Jim Rohn' },
+  { text: "Don't wish it were easier. Wish you were better.", author: 'Jim Rohn' },
+  { text: 'Motivation is what gets you started. Habit is what keeps you going.', author: 'Jim Rohn' },
+  { text: 'We become what we think about.', author: 'Earl Nightingale' },
+  { text: 'Success is the progressive realization of a worthy ideal.', author: 'Earl Nightingale' },
+  { text: 'Whatever the mind can conceive and believe, it can achieve.', author: 'Napoleon Hill' },
+  { text: "Don't wait. The time will never be just right.", author: 'Napoleon Hill' },
+  { text: 'Strength and growth come only through continuous effort and struggle.', author: 'Napoleon Hill' },
+  { text: 'People rarely succeed unless they have fun in what they are doing.', author: 'Dale Carnegie' },
+  { text: 'Take a chance. All life is a chance.', author: 'Dale Carnegie' },
+  { text: 'I will persist until I succeed.', author: 'Og Mandino' },
+  { text: 'I will act now.', author: 'Og Mandino' },
+  { text: 'You can only grow if you are willing to feel awkward and uncomfortable when you try something new.', author: 'Brian Tracy' },
+  { text: "Pretend that every single person you meet has a sign around his or her neck that says, 'Make me feel important.'", author: 'Mary Kay Ash' },
+  { text: 'We fall forward to succeed.', author: 'Mary Kay Ash' },
+  { text: "Dig your well before you're thirsty.", author: 'Harvey Mackay' },
+  { text: 'A leader is one who knows the way, goes the way, and shows the way.', author: 'John C. Maxwell' },
+  { text: 'Fail early, fail often, but always fail forward.', author: 'John C. Maxwell' },
+  { text: "You don't have to be great to start, but you have to start to be great.", author: 'Les Brown' },
+  { text: 'Sales are contingent upon the attitude of the salesman, not the attitude of the prospect.', author: 'W. Clement Stone' },
+  { text: 'Thinking will not overcome fear, but action will.', author: 'W. Clement Stone' },
+  { text: 'Force yourself to act enthusiastic, and you will become enthusiastic.', author: 'Frank Bettger' },
+  { text: 'Success is your duty, obligation, and responsibility.', author: 'Grant Cardone' },
+  { text: "People don't like to be sold, but they love to buy.", author: 'Jeffrey Gitomer' },
+  { text: 'The path to success is to take massive, determined action.', author: 'Tony Robbins' },
+  { text: 'The main thing is to keep the main thing the main thing.', author: 'Stephen R. Covey' },
+  { text: 'Begin with the end in mind.', author: 'Stephen R. Covey' },
+  { text: 'The best way to predict the future is to invent it.', author: 'Alan Kay' },
+  { text: "I can accept failure. Everyone fails at something. But I can't accept not trying.", author: 'Michael Jordan' },
+  { text: 'Rest at the end, not in the middle.', author: 'Kobe Bryant' },
+  { text: 'I really think a champion is defined not by their wins but by how they can recover when they fall.', author: 'Serena Williams' },
+  { text: 'There are no secrets to success. It is the result of preparation, hard work, and learning from failure.', author: 'Colin Powell' },
+  { text: "It's quite simple, really. Double your rate of failure.", author: 'Thomas J. Watson' },
+  { text: 'There is only one boss. The customer.', author: 'Sam Walton' },
+  { text: 'The way to get started is to quit talking and begin doing.', author: 'Walt Disney' },
+  { text: 'All our dreams can come true, if we have the courage to pursue them.', author: 'Walt Disney' },
+  { text: 'The only way to do great work is to love what you do.', author: 'Steve Jobs' },
+  { text: 'If somebody offers you an amazing opportunity but you are not sure you can do it, say yes, then learn how to do it later.', author: 'Richard Branson' },
+  { text: "People don't buy what you do; they buy why you do it.", author: 'Simon Sinek' },
+  { text: 'In a crowded marketplace, fitting in is failing.', author: 'Seth Godin' },
+  { text: 'Under-promise and over-deliver.', author: 'Tom Peters' },
+  { text: 'Success is the sum of small efforts, repeated day in and day out.', author: 'Robert Collier' },
+  { text: 'You do not rise to the level of your goals. You fall to the level of your systems.', author: 'James Clear' },
+  { text: 'Enthusiasm is common. Endurance is rare.', author: 'Angela Duckworth' },
+  { text: 'Becoming is better than being.', author: 'Carol Dweck' },
+  { text: 'What stands in the way becomes the way.', author: 'Marcus Aurelius' },
+  { text: 'No one knows what he can do until he tries.', author: 'Publilius Syrus' },
+  { text: 'They can because they think they can.', author: 'Virgil' },
+  { text: 'What you do speaks so loudly that I cannot hear what you say.', author: 'Ralph Waldo Emerson' },
+  { text: 'Make each day your masterpiece.', author: 'John Wooden' },
+  { text: 'Do not let what you cannot do interfere with what you can do.', author: 'John Wooden' },
+  { text: 'Perfection is not attainable, but if we chase perfection we can catch excellence.', author: 'Vince Lombardi' },
+  { text: "It's not the will to win that matters. It's the will to prepare to win that matters.", author: 'Bear Bryant' },
+  { text: "Success is a project that's always under construction.", author: 'Pat Summitt' },
+  { text: 'Ability is what you are capable of doing. Motivation determines what you do. Attitude determines how well you do it.', author: 'Lou Holtz' },
+  { text: 'A dream becomes a goal when action is taken toward its achievement.', author: 'Bo Bennett' },
+  { text: 'What you do today can improve all your tomorrows.', author: 'Robin Sharma' },
+  { text: 'The best advertising is done by satisfied customers.', author: 'Philip Kotler' },
+  { text: "If you love life, don't waste time, for time is what life is made up of.", author: 'Bruce Lee' },
+  { text: 'Tell the truth, but make the truth fascinating.', author: 'David Ogilvy' },
+];
+function quoteFor(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  const n = Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+  const q = QUOTES[((n % QUOTES.length) + QUOTES.length) % QUOTES.length];
+  return { text: q.text, author: q.author };
+}
 const thisWeek = () => weekStartOf(nzDay());
 const validWeek = w => (typeof w === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(w)) ? weekStartOf(w) : thisWeek();
+function validDay(day) {
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const [y, m, d] = day.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toISOString().slice(0, 10) === day ? day : null;
+}
+function editableDay(day) {
+  const d = validDay(day);
+  if (!d) return null;
+  const today = nzDay();
+  if (d > today || d < addDays(today, -(DAY_WINDOW - 1))) return null;
+  return d;
+}
+function monthOf(day) { return day.slice(0, 7); }
+function validMonth(s) {
+  if (typeof s !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(s)) return null;
+  return s;
+}
+function monthEnd(month) {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+function addMonths(month, n) {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
+}
+function recentDays(today = nzDay()) {
+  const out = [];
+  for (let i = 0; i < DAY_WINDOW; i++) out.push(addDays(today, -i));
+  return out;
+}
 
 function ensureEntry(uid, week) {
   let e = db.prepare('SELECT * FROM entries WHERE user_id=? AND week_start=?').get(uid, week);
   if (!e) {
-    const prev = db.prepare('SELECT pipeline_count, pipeline_note FROM entries WHERE user_id=? AND week_start<? ORDER BY week_start DESC LIMIT 1').get(uid, week);
-    db.prepare('INSERT INTO entries(user_id,week_start,pipeline_count,pipeline_note) VALUES(?,?,?,?)').run(uid, week, prev ? prev.pipeline_count : 0, prev ? prev.pipeline_note : '');
+    // Pipeline addresses live in pipeline_entries, so a new week does not copy the old count or note.
+    db.prepare('INSERT INTO entries(user_id,week_start) VALUES(?,?)').run(uid, week);
     e = db.prepare('SELECT * FROM entries WHERE user_id=? AND week_start=?').get(uid, week);
   }
   return e;
 }
-const hasNumbers = e => !!e && (METRICS.some(m => e[m] > 0) || !!e.last_day);
+function blankMetrics() { const o = {}; METRICS.forEach(m => o[m] = 0); return o; }
+function sumMetrics(uid, from, to) {
+  const r = db.prepare(`SELECT ${METRICS.map(m => `COALESCE(SUM(${m}),0) AS ${m}`).join(',')} FROM day_entries WHERE user_id=? AND day>=? AND day<=?`).get(uid, from, to);
+  const o = blankMetrics(); METRICS.forEach(m => o[m] = r[m] || 0); return o;
+}
+function scoreOf(r) { return (r.appr_done || 0) * 30 + (r.appr_booked || 0) * 20 + (r.cold_calls || 0) + (r.door_knocks || 0) + (r.letter_drops || 0); }
+function enteredMetrics(r) { return METRICS.some(m => (r[m] || 0) > 0); }
 
 // ---- app ----
 const app = express();
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '50kb' }));
 app.use(cookieParser());
@@ -87,7 +335,7 @@ function auth(req) {
   return u;
 }
 const requireUser = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); req.user = u; next(); };
-const requireAdmin = (req, res, next) => { const u = auth(req); if (!u || u.role !== 'admin') return res.status(403).json({ error: 'Admin only' }); req.user = u; next(); };
+const requireAdmin = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); if (u.role !== 'admin') return res.status(403).json({ error: 'Admin only' }); req.user = u; next(); };
 // Basic CSRF guard: state-changing API calls must be JSON (forms from other sites can't send that cross-origin without CORS)
 app.use('/api', (req, res, next) => { if (req.method === 'POST' && !req.is('application/json')) return res.status(415).json({ error: 'JSON required' }); next(); });
 
@@ -115,124 +363,405 @@ app.post('/api/password', requireUser, (req, res) => {
   res.json({ ok: true });
 });
 
+function listWeeks() {
+  const days = db.prepare('SELECT DISTINCT day FROM day_entries').all().map(r => weekStartOf(r.day));
+  const legacy = db.prepare('SELECT DISTINCT week_start FROM entries').all().map(r => r.week_start);
+  return [...new Set([...days, ...legacy, thisWeek()])].sort().reverse().slice(0, 104);
+}
+function listMonths() {
+  const months = db.prepare("SELECT DISTINCT substr(day,1,7) AS m FROM day_entries").all().map(r => r.m);
+  return [...new Set([...months, monthOf(nzDay())])].sort().reverse().slice(0, 36);
+}
+function pipelineCountMap() {
+  return Object.fromEntries(db.prepare('SELECT user_id, COUNT(*) AS n FROM pipeline_entries GROUP BY user_id').all().map(r => [r.user_id, r.n]));
+}
+function weekDays(week) { const out = []; for (let i = 0; i < 7; i++) out.push(addDays(week, i)); return out; }
+function dailyTotals(week, userId) {
+  const from = week, to = addDays(week, 6);
+  const cols = METRICS.map(m => `COALESCE(SUM(${userId ? '' : 'd.'}${m}),0) AS ${m}`).join(',');
+  const rows = userId
+    ? db.prepare(`SELECT day, ${cols} FROM day_entries WHERE user_id=? AND day>=? AND day<=? GROUP BY day`).all(userId, from, to)
+    : db.prepare(`SELECT d.day AS day, ${cols} FROM day_entries d JOIN users u ON u.id=d.user_id WHERE u.role='agent' AND u.active=1 AND d.day>=? AND d.day<=? GROUP BY d.day`).all(from, to);
+  const by = Object.fromEntries(rows.map(r => [r.day, r]));
+  return weekDays(week).map(day => {
+    const src = by[day] || {};
+    const o = { day };
+    METRICS.forEach(m => o[m] = src[m] || 0);
+    return o;
+  });
+}
 function teamData(week) {
-  const today = nzDay(); const cur = thisWeek();
+  const today = nzDay();
+  const from = week, to = addDays(week, 6);
+  const pipes = pipelineCountMap();
   const agents = db.prepare("SELECT id,name FROM users WHERE role='agent' AND active=1 ORDER BY name").all();
   const rows = agents.map(a => {
-    const e = db.prepare('SELECT * FROM entries WHERE user_id=? AND week_start=?').get(a.id, week) || {};
-    const r = { id: a.id, name: a.name, entered: hasNumbers(e) };
-    METRICS.forEach(m => r[m] = e[m] || 0);
-    r.pipeline_count = e.pipeline_count || 0; r.pipeline_note = e.pipeline_note || '';
-    r.working_today = week === cur && e.last_day === today;
-    r.status = (week === cur && e.status_day === today) ? (e.status || '') : '';
-    r.updated_at = e.updated_at || null;
-    r.score = r.door_knocks + r.cold_calls + r.appr_booked * 20 + r.appr_done * 30;
+    const sums = sumMetrics(a.id, from, to);
+    const r = { id: a.id, name: a.name, entered: enteredMetrics(sums) };
+    Object.assign(r, sums);
+    r.pipeline_count = pipes[a.id] || 0;
+    r.score = scoreOf(r);
     return r;
   });
-  const totals = {}; METRICS.forEach(m => totals[m] = rows.reduce((s, r) => s + r[m], 0));
+  const totals = blankMetrics(); METRICS.forEach(m => totals[m] = rows.reduce((s, r) => s + r[m], 0));
   totals.pipeline_count = rows.reduce((s, r) => s + r.pipeline_count, 0);
-  return { brand: BRAND, week, week_end: addDays(week, 6), today, rows, totals, targets: JSON.parse(getSetting('targets')),
-    entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
+  return { brand: BRAND, view: 'week', week, week_end: to, today, rows, totals, targets: targetsNow(),
+    daily: dailyTotals(week), quote: quoteFor(today), entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
+}
+function monthData(month) {
+  const today = nzDay();
+  const from = month + '-01', to = monthEnd(month);
+  const agents = db.prepare("SELECT id,name FROM users WHERE role='agent' AND active=1 ORDER BY name").all();
+  const rows = agents.map(a => {
+    const sums = sumMetrics(a.id, from, to);
+    const r = { id: a.id, name: a.name, entered: enteredMetrics(sums) };
+    Object.assign(r, sums);
+    r.score = scoreOf(r);
+    return r;
+  });
+  const totals = blankMetrics(); METRICS.forEach(m => totals[m] = rows.reduce((s, r) => s + r[m], 0));
+  totals.pipeline_count = 0;
+  return { brand: BRAND, view: 'month', month, month_start: from, month_end: to, today, rows, totals, targets: targetsNow(),
+    quote: quoteFor(today), entered_count: rows.filter(r => r.entered).length, agent_count: rows.length, labels: LABELS };
+}
+
+function dayRow(uid, day) {
+  return db.prepare('SELECT * FROM day_entries WHERE user_id=? AND day=?').get(uid, day) || { user_id: uid, day, ...blankMetrics() };
+}
+function saveDayMetrics(uid, day, patch) {
+  const cur = dayRow(uid, day);
+  const next = {};
+  METRICS.forEach(m => next[m] = patch[m] === undefined ? (cur[m] || 0) : patch[m]);
+  db.prepare(`INSERT INTO day_entries(user_id,day,${METRICS.join(',')},updated_at) VALUES(?,?,${METRICS.map(() => '?').join(',')},datetime('now'))
+    ON CONFLICT(user_id,day) DO UPDATE SET ${METRICS.map(m => `${m}=excluded.${m}`).join(',')}, updated_at=datetime('now')`)
+    .run(uid, day, ...METRICS.map(m => next[m]));
+  db.prepare("INSERT INTO activity(user_id,day,ts,field,value) VALUES(?,?,datetime('now'),?,?)").run(uid, day, 'day', JSON.stringify(next).slice(0, 200));
+  return dayRow(uid, day);
 }
 
 // --- agent ---
 app.get('/api/me', requireUser, (req, res) => {
-  const w = thisWeek(); const e = ensureEntry(req.user.id, w); const t = teamData(w);
   const today = nzDay();
-  res.json({ user: req.user, entry: { ...e, status: e.status_day === today ? e.status : '', working_today: e.last_day === today }, team: { totals: t.totals, targets: t.targets, entered_count: t.entered_count, agent_count: t.agent_count, week: w, week_end: t.week_end }, labels: LABELS });
+  if (req.query.day && !editableDay(req.query.day)) return res.status(400).json({ error: 'Pick today or a day in the last 14 days' });
+  const day = req.query.day ? editableDay(req.query.day) : today;
+  const w = thisWeek(); ensureEntry(req.user.id, w); const t = teamData(w);
+  const month = monthOf(today);
+  const entry = dayRow(req.user.id, day);
+  res.json({
+    user: req.user, today, day, recent_days: recentDays(today),
+    entry,
+    week: { week: w, week_end: addDays(w, 6), ...sumMetrics(req.user.id, w, addDays(w, 6)) },
+    month: { month, ...sumMetrics(req.user.id, month + '-01', monthEnd(month)) },
+    daily: dailyTotals(w, req.user.id),
+    team: { totals: t.totals, targets: t.targets, entered_count: t.entered_count, agent_count: t.agent_count, week: w, week_end: t.week_end },
+    labels: LABELS
+  });
 });
-function touch(uid, week, field, value) {
-  const today = nzDay();
-  db.prepare("UPDATE entries SET last_day=?, updated_at=datetime('now') WHERE user_id=? AND week_start=?").run(today, uid, week);
-  db.prepare("INSERT INTO activity(user_id,day,ts,field,value) VALUES(?,?,datetime('now'),?,?)").run(uid, today, field, String(value).slice(0, 200));
-}
 app.post('/api/me/inc', requireUser, (req, res) => {
   const { field } = req.body || {}; const delta = Number((req.body || {}).delta) || 1;
   if (!METRICS.includes(field) || Math.abs(delta) > 100) return res.status(400).json({ error: 'Bad field' });
-  const w = thisWeek(); ensureEntry(req.user.id, w);
-  db.prepare(`UPDATE entries SET ${field}=MAX(0, ${field}+?) WHERE user_id=? AND week_start=?`).run(delta, req.user.id, w);
-  touch(req.user.id, w, field, delta);
-  res.json({ ok: true, entry: db.prepare('SELECT * FROM entries WHERE user_id=? AND week_start=?').get(req.user.id, w) });
+  const day = (req.body || {}).day ? editableDay((req.body || {}).day) : nzDay();
+  if (!day) return res.status(400).json({ error: 'Pick today or a day in the last 14 days' });
+  const cur = dayRow(req.user.id, day);
+  const patch = {}; patch[field] = Math.max(0, (cur[field] || 0) + delta);
+  res.json({ ok: true, entry: saveDayMetrics(req.user.id, day, patch) });
 });
 app.post('/api/me/entry', requireUser, (req, res) => {
-  const b = req.body || {}; const w = thisWeek(); ensureEntry(req.user.id, w);
-  const sets = [], vals = [];
-  for (const m of [...METRICS, 'pipeline_count']) if (b[m] !== undefined) { const n = Math.max(0, Math.min(100000, parseInt(b[m], 10) || 0)); sets.push(`${m}=?`); vals.push(n); }
-  if (b.pipeline_note !== undefined) { sets.push('pipeline_note=?'); vals.push(String(b.pipeline_note).slice(0, 300)); }
-  if (b.status !== undefined) { sets.push('status=?', 'status_day=?'); vals.push(String(b.status).slice(0, 120), nzDay()); }
-  if (!sets.length) return res.status(400).json({ error: 'Nothing to save' });
-  db.prepare(`UPDATE entries SET ${sets.join(',')} WHERE user_id=? AND week_start=?`).run(...vals, req.user.id, w);
-  touch(req.user.id, w, 'save', JSON.stringify(b).slice(0, 200));
+  const b = req.body || {};
+  const metricPatch = {};
+  for (const m of METRICS) if (b[m] !== undefined) metricPatch[m] = Math.max(0, Math.min(100000, parseInt(b[m], 10) || 0));
+  if (!Object.keys(metricPatch).length) return res.status(400).json({ error: 'Nothing to save' });
+  const day = b.day ? editableDay(b.day) : nzDay();
+  if (!day) return res.status(400).json({ error: 'Pick today or a day in the last 14 days' });
+  saveDayMetrics(req.user.id, day, metricPatch);
   res.json({ ok: true });
 });
 app.get('/api/me/history', requireUser, (req, res) => {
-  res.json(db.prepare('SELECT * FROM entries WHERE user_id=? ORDER BY week_start DESC LIMIT 26').all(req.user.id));
+  const days = db.prepare('SELECT * FROM day_entries WHERE user_id=? ORDER BY day DESC LIMIT 400').all(req.user.id);
+  const byWeek = new Map();
+  for (const d of days) {
+    const w = weekStartOf(d.day);
+    if (!byWeek.has(w)) byWeek.set(w, { week_start: w, ...blankMetrics() });
+    const row = byWeek.get(w);
+    METRICS.forEach(m => row[m] += d[m] || 0);
+  }
+  res.json([...byWeek.values()].sort((a, b) => b.week_start.localeCompare(a.week_start)).slice(0, 26));
 });
 
-// --- TV (token) ---
+function pipelineId(v) { const id = Number(v); return Number.isInteger(id) && id > 0 ? id : null; }
+function ownPipeline(userId, id) {
+  return db.prepare('SELECT id, address, notes, stage, created_at, updated_at FROM pipeline_entries WHERE id=? AND user_id=?').get(id, userId);
+}
+app.get('/api/me/pipeline', requireUser, (req, res) => {
+  const entries = db.prepare('SELECT id, address, notes, stage, created_at, updated_at FROM pipeline_entries WHERE user_id=? ORDER BY id DESC').all(req.user.id);
+  res.json({ entries, stages: PIPELINE_STAGES.filter(Boolean) });
+});
+app.get('/api/me/pipeline/:id', requireUser, (req, res) => {
+  const id = pipelineId(req.params.id);
+  const row = id && ownPipeline(req.user.id, id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  res.json(row);
+});
+app.post('/api/me/pipeline', requireUser, (req, res) => {
+  const b = req.body || {};
+  const address = cleanAddress(b.address);
+  if (!address) return res.status(400).json({ error: 'Property address is required' });
+  const stage = b.stage === undefined || b.stage === '' ? '' : cleanStage(b.stage);
+  if (stage === null) return res.status(400).json({ error: 'Unknown stage' });
+  const info = db.prepare(`INSERT INTO pipeline_entries(user_id,address,notes,stage,created_at,updated_at) VALUES(?,?,?,?,datetime('now'),datetime('now'))`)
+    .run(req.user.id, address, cleanNotes(b.notes), stage);
+  res.json({ ok: true, entry: ownPipeline(req.user.id, Number(info.lastInsertRowid)) });
+});
+app.post('/api/me/pipeline/:id', requireUser, (req, res) => {
+  const id = pipelineId(req.params.id);
+  const row = id && ownPipeline(req.user.id, id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const address = b.address === undefined ? row.address : cleanAddress(b.address);
+  if (!address) return res.status(400).json({ error: 'Property address is required' });
+  const stage = b.stage === undefined ? row.stage : cleanStage(b.stage);
+  if (stage === null) return res.status(400).json({ error: 'Unknown stage' });
+  const notes = b.notes === undefined ? row.notes : cleanNotes(b.notes);
+  db.prepare(`UPDATE pipeline_entries SET address=?, notes=?, stage=?, updated_at=datetime('now') WHERE id=? AND user_id=?`).run(address, notes, stage, id, req.user.id);
+  const entry = ownPipeline(req.user.id, id);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true, entry });
+});
+app.post('/api/me/pipeline/:id/delete', requireUser, (req, res) => {
+  const id = pipelineId(req.params.id);
+  if (!id) return res.status(404).json({ error: 'Not found' });
+  const changed = db.prepare('DELETE FROM pipeline_entries WHERE id=? AND user_id=?').run(id, req.user.id);
+  if (!changed.changes) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+// --- TV (short code) ---
+const tvFails = new Map();
+function tvBlocked(ip) {
+  const now = Date.now();
+  const a = (tvFails.get(ip) || []).filter(t => now - t < 10 * 60e3);
+  tvFails.set(ip, a);
+  return a.length >= 10;
+}
+function tvNoteFail(ip) {
+  const now = Date.now();
+  const a = (tvFails.get(ip) || []).filter(t => now - t < 10 * 60e3);
+  a.push(now);
+  tvFails.set(ip, a);
+}
+function tvCodeOk(raw) {
+  const code = String(raw || '').trim().toLowerCase();
+  return !!code && code === getSetting('tv_key');
+}
+function setTvCookie(req, res) {
+  res.cookie('tv', getSetting('tv_key'), { httpOnly: true, sameSite: 'lax', secure: !!req.secure, maxAge: 365 * 864e5, path: '/' });
+}
+function tvCodePage(msg) {
+  const note = msg ? `<p class="err">${msg}</p>` : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TV code · Harcourts TGB Group</title>
+<style>html,body{margin:0;height:100%;background:#071630;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}.box{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center}h1{font-size:42px;font-weight:800;letter-spacing:-.03em;margin:0 0 12px}p.lead{color:#9BB0CC;font-size:22px;margin:0 0 28px}input{font-family:inherit;font-size:64px;font-weight:800;line-height:1;letter-spacing:.28em;text-align:center;text-transform:lowercase;width:min(640px,92vw);padding:22px 12px;border-radius:18px;border:3px solid #00ADEF;background:#0B1F3A;color:#fff}button{margin-top:22px;font-size:28px;font-weight:800;padding:18px 48px;border:0;border-radius:16px;background:#00ADEF;color:#071630}p.err{color:#FCA5A5;font-size:24px;margin:22px 0 0}</style></head>
+<body><form class="box" method="get" action="/tv"><h1>Harcourts <span style="color:#00ADEF;font-weight:300">TGB Group</span></h1><p class="lead">Type the 6-character TV code</p><input name="key" maxlength="6" autocapitalize="none" autocomplete="off" spellcheck="false" autofocus inputmode="text" aria-label="TV code"><button type="submit">Open the board</button>${note}</form></body></html>`;
+}
+function tvReject(req, res, json) {
+  if (tvBlocked(req.ip)) {
+    if (json) return res.status(429).json({ error: 'Too many attempts. Try again in 10 minutes.' });
+    return res.status(429).type('html').send(tvCodePage('Too many tries. Wait 10 minutes.'));
+  }
+  tvNoteFail(req.ip);
+  if (json) return res.status(403).json({ error: 'Bad key' });
+  return res.status(403).type('html').send(tvCodePage('That code is not right.'));
+}
 app.get('/api/tv', (req, res) => {
-  if (!req.query.key || req.query.key !== getSetting('tv_key')) return res.status(403).json({ error: 'Bad key' });
+  const given = req.query.key != null && String(req.query.key) !== '' ? String(req.query.key).trim().toLowerCase() : '';
+  const ok = given ? given === getSetting('tv_key') : req.cookies.tv === getSetting('tv_key');
+  if (!ok) return given ? tvReject(req, res, true) : res.status(403).json({ error: 'Bad key' });
   const t = teamData(thisWeek());
-  // TV shows team totals, status board and leaderboard only (no history)
-  t.rows = t.rows.map(r => ({ name: r.name, entered: r.entered, working_today: r.working_today, status: r.status, pipeline_count: r.pipeline_count, door_knocks: r.door_knocks, cold_calls: r.cold_calls, appr_booked: r.appr_booked, appr_done: r.appr_done, score: r.score }));
+  const md = monthData(monthOf(t.today));
+  const scaled = monthTargetsFromWeekly(md.month, t.targets);
+  t.month = md.month;
+  t.month_totals = blankMetrics();
+  METRICS.forEach(m => t.month_totals[m] = md.totals[m] || 0);
+  t.month_targets = scaled.targets;
+  t.month_days = scaled.days;
+  t.month_target_basis = scaled.basis;
+  // Counts and scores only. No addresses, and no check-in status.
+  t.rows = t.rows.map(r => ({ name: r.name, entered: r.entered, pipeline_count: r.pipeline_count, appr_done: r.appr_done, appr_booked: r.appr_booked, cold_calls: r.cold_calls, door_knocks: r.door_knocks, letter_drops: r.letter_drops, score: r.score }));
   res.set('Cache-Control', 'no-store'); res.json(t);
 });
 
 // --- admin ---
 app.get('/api/admin/summary', requireAdmin, (req, res) => {
-  const w = validWeek(req.query.week); const cur = teamData(w); const prev = teamData(addDays(w, -7));
-  const weeks = db.prepare('SELECT DISTINCT week_start FROM entries ORDER BY week_start DESC LIMIT 104').all().map(r => r.week_start);
-  if (!weeks.includes(thisWeek())) weeks.unshift(thisWeek());
-  const prevBy = Object.fromEntries(prev.rows.map(r => [r.id, r]));
-  cur.rows.forEach(r => { const p = prevBy[r.id] || {}; r.last = {}; METRICS.forEach(m => r.last[m] = p[m] || 0); });
-  res.json({ ...cur, last_totals: prev.totals, last_week: prev.week, weeks, tv_key: getSetting('tv_key'), missing: cur.rows.filter(r => !r.entered).map(r => r.name) });
+  const view = req.query.view === 'month' ? 'month' : 'week';
+  const weeks = listWeeks();
+  const months = listMonths();
+  if (view === 'month') {
+    const month = validMonth(req.query.month) || monthOf(nzDay());
+    const cur = monthData(month); const prev = monthData(addMonths(month, -1));
+    const prevBy = Object.fromEntries(prev.rows.map(r => [r.id, r]));
+    cur.rows.forEach(r => { const p = prevBy[r.id] || {}; r.last = {}; METRICS.forEach(m => r.last[m] = p[m] || 0); });
+    res.json({ ...cur, last_totals: prev.totals, last_month: prev.month, weeks, months, tv_key: getSetting('tv_key'), missing: cur.rows.filter(r => !r.entered).map(r => r.name), targets_apply: false, me: { id: req.user.id, must_change: !!req.user.must_change } });
+  } else {
+    const w = validWeek(req.query.week); const cur = teamData(w); const prev = teamData(addDays(w, -7));
+    const prevBy = Object.fromEntries(prev.rows.map(r => [r.id, r]));
+    cur.rows.forEach(r => { const p = prevBy[r.id] || {}; r.last = {}; METRICS.forEach(m => r.last[m] = p[m] || 0); });
+    res.json({ ...cur, last_totals: prev.totals, last_week: prev.week, weeks, months, tv_key: getSetting('tv_key'), missing: cur.rows.filter(r => !r.entered).map(r => r.name), targets_apply: true, me: { id: req.user.id, must_change: !!req.user.must_change } });
+  }
 });
 app.get('/api/admin/users', requireAdmin, (req, res) => res.json(db.prepare('SELECT id,name,email,role,active,must_change,created_at FROM users ORDER BY role, name').all()));
+function httpError(status, error) { const e = new Error(error); e.status = status; return e; }
+function assertKeepsActiveAdmin(u) {
+  if (!u || u.role !== 'admin' || !u.active) return;
+  const others = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin' AND active=1 AND id!=?").get(u.id).n;
+  if (others < 1) throw httpError(400, 'There must be at least one active admin');
+}
 app.post('/api/admin/users', requireAdmin, (req, res) => {
-  const { name, email, password } = req.body || {};
+  const { name, email, password, role } = req.body || {};
+  const nextRole = role == null ? 'agent' : role;
+  if (nextRole !== 'agent' && nextRole !== 'admin') return res.status(400).json({ error: 'Role must be agent or admin' });
   if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || ''))) return res.status(400).json({ error: 'Name and a valid email are needed' });
   if (String(password || '').length < 6) return res.status(400).json({ error: 'Temporary password must be at least 6 characters' });
-  try { const r = db.prepare("INSERT INTO users(name,email,pass_hash,role) VALUES(?,?,?,'agent')").run(String(name).trim().slice(0, 80), String(email).trim(), bcrypt.hashSync(String(password), 10)); res.json({ ok: true, id: r.lastInsertRowid }); }
+  try { const r = db.prepare('INSERT INTO users(name,email,pass_hash,role,must_change) VALUES(?,?,?,?,1)').run(String(name).trim().slice(0, 80), String(email).trim(), bcrypt.hashSync(String(password), 10), nextRole); res.json({ ok: true, id: r.lastInsertRowid }); }
   catch (e) { res.status(400).json({ error: 'That email already has an account' }); }
 });
 app.post('/api/admin/users/:id/reset', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (id === Number(req.user.id)) return res.status(400).json({ error: "You can't reset your own password here" });
   const pw = String((req.body || {}).password || ''); if (pw.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  db.prepare('UPDATE users SET pass_hash=?, must_change=1 WHERE id=?').run(bcrypt.hashSync(pw, 10), req.params.id);
-  db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.params.id); res.json({ ok: true });
+  const u = db.prepare('SELECT id FROM users WHERE id=?').get(id); if (!u) return res.status(404).json({ error: 'Not found' });
+  db.prepare('UPDATE users SET pass_hash=?, must_change=1 WHERE id=?').run(bcrypt.hashSync(pw, 10), id);
+  db.prepare('DELETE FROM sessions WHERE user_id=?').run(id); res.json({ ok: true });
 });
 app.post('/api/admin/users/:id/active', requireAdmin, (req, res) => {
-  if (Number(req.params.id) === req.user.id) return res.status(400).json({ error: "You can't deactivate yourself" });
-  db.prepare('UPDATE users SET active=? WHERE id=?').run((req.body || {}).active ? 1 : 0, req.params.id);
-  if (!(req.body || {}).active) db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.params.id); res.json({ ok: true });
-});
-app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
-  const id = Number(req.params.id); if (id === req.user.id) return res.status(400).json({ error: "You can't delete yourself" });
-  const u = db.prepare('SELECT role FROM users WHERE id=?').get(id); if (!u) return res.status(404).json({ error: 'Not found' });
-  db.transaction(() => { ['sessions', 'entries', 'activity'].forEach(t => db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(id)); db.prepare('DELETE FROM users WHERE id=?').run(id); })();
+  const id = Number(req.params.id);
+  const active = (req.body || {}).active ? 1 : 0;
+  try {
+    db.transaction(() => {
+      const u = db.prepare('SELECT id, role, active FROM users WHERE id=?').get(id);
+      if (!u) throw httpError(404, 'Not found');
+      if (!active) assertKeepsActiveAdmin(u);
+      if (id === Number(req.user.id)) throw httpError(400, "You can't deactivate yourself");
+      db.prepare('UPDATE users SET active=? WHERE id=?').run(active, id);
+      if (!active) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+    }).immediate();
+  } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
   res.json({ ok: true });
 });
-app.get('/api/admin/agent/:id/history', requireAdmin, (req, res) => res.json(db.prepare('SELECT * FROM entries WHERE user_id=? ORDER BY week_start DESC LIMIT 52').all(req.params.id)));
+app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    db.transaction(() => {
+      const u = db.prepare('SELECT id, role, active FROM users WHERE id=?').get(id);
+      if (!u) throw httpError(404, 'Not found');
+      assertKeepsActiveAdmin(u);
+      if (id === Number(req.user.id)) throw httpError(400, "You can't delete yourself");
+      ['sessions', 'entries', 'activity'].forEach(t => db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(id));
+      db.prepare('DELETE FROM users WHERE id=?').run(id);
+    }).immediate();
+  } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
+  res.json({ ok: true });
+});
+app.get('/api/admin/agent/:id/history', requireAdmin, (req, res) => res.json(db.prepare('SELECT * FROM day_entries WHERE user_id=? ORDER BY day DESC LIMIT 120').all(req.params.id)));
 app.post('/api/admin/targets', requireAdmin, (req, res) => {
   const t = {}; METRICS.forEach(m => t[m] = Math.max(0, parseInt((req.body || {})[m], 10) || 0)); setSetting('targets', JSON.stringify(t)); res.json({ ok: true, targets: t });
 });
-app.post('/api/admin/tvkey', requireAdmin, (req, res) => { const k = crypto.randomBytes(12).toString('base64url'); setSetting('tv_key', k); res.json({ ok: true, tv_key: k }); });
+app.post('/api/admin/tvkey', requireAdmin, (req, res) => { const k = newTvCode(); setSetting('tv_key', k); res.json({ ok: true, tv_key: k }); });
+function csvEsc(v) { v = v == null ? '' : String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function sendCsv(res, filename, head, rows) {
+  const csv = [head.join(','), ...rows.map(r => head.map(h => csvEsc(r[h])).join(','))].join('\n');
+  res.set('Content-Type', 'text/csv'); res.set('Content-Disposition', `attachment; filename="${filename}"`); res.send(csv);
+}
 app.get('/api/admin/export.csv', requireAdmin, (req, res) => {
+  const grain = ['day', 'week', 'month'].includes(req.query.grain) ? req.query.grain : 'day';
   const all = req.query.all === '1';
-  const rows = all ? db.prepare("SELECT e.*, u.name, u.email FROM entries e JOIN users u ON u.id=e.user_id WHERE u.role='agent' ORDER BY e.week_start DESC, u.name").all()
-    : db.prepare("SELECT e.*, u.name, u.email FROM entries e JOIN users u ON u.id=e.user_id WHERE u.role='agent' AND e.week_start=? ORDER BY u.name").all(validWeek(req.query.week));
-  const esc = v => { v = v == null ? '' : String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-  const head = ['week_start', 'name', 'email', ...METRICS, 'pipeline_count', 'pipeline_note', 'status', 'updated_at'];
-  const csv = [head.join(','), ...rows.map(r => head.map(h => esc(r[h])).join(','))].join('\n');
-  res.set('Content-Type', 'text/csv'); res.set('Content-Disposition', `attachment; filename="tgb-team-numbers-${all ? 'all' : validWeek(req.query.week)}.csv"`); res.send(csv);
+  const agents = db.prepare("SELECT id,name,email FROM users WHERE role='agent' ORDER BY name").all();
+  if (grain === 'day') {
+    let rows;
+    if (all) rows = db.prepare("SELECT d.*, u.name, u.email FROM day_entries d JOIN users u ON u.id=d.user_id WHERE u.role='agent' ORDER BY d.day DESC, u.name").all();
+    else if (validMonth(req.query.month)) rows = db.prepare("SELECT d.*, u.name, u.email FROM day_entries d JOIN users u ON u.id=d.user_id WHERE u.role='agent' AND d.day>=? AND d.day<=? ORDER BY d.day DESC, u.name").all(req.query.month + '-01', monthEnd(req.query.month));
+    else { const w = validWeek(req.query.week); rows = db.prepare("SELECT d.*, u.name, u.email FROM day_entries d JOIN users u ON u.id=d.user_id WHERE u.role='agent' AND d.day>=? AND d.day<=? ORDER BY d.day DESC, u.name").all(w, addDays(w, 6)); }
+    return sendCsv(res, `tgb-daily-${all ? 'all' : (validMonth(req.query.month) || validWeek(req.query.week))}.csv`, ['day', 'name', 'email', ...METRICS, 'updated_at'], rows);
+  }
+  if (grain === 'month') {
+    const months = all ? listMonths() : [validMonth(req.query.month) || monthOf(nzDay())];
+    const rows = [];
+    for (const month of months) for (const a of agents) {
+      const sums = sumMetrics(a.id, month + '-01', monthEnd(month));
+      if (!enteredMetrics(sums)) continue;
+      rows.push({ month, name: a.name, email: a.email, ...sums });
+    }
+    return sendCsv(res, `tgb-month-${all ? 'all' : months[0]}.csv`, ['month', 'name', 'email', ...METRICS], rows);
+  }
+  const weeks = all ? listWeeks() : [validWeek(req.query.week)];
+  const rows = [];
+  for (const week of weeks) for (const a of agents) {
+    const sums = sumMetrics(a.id, week, addDays(week, 6));
+    const e = db.prepare('SELECT pipeline_count, pipeline_note FROM entries WHERE user_id=? AND week_start=?').get(a.id, week);
+    if (!enteredMetrics(sums) && !e) continue;
+    // pipeline_count / pipeline_note remain the old weekly snapshot. Address rows are a separate CSV.
+    rows.push({ week_start: week, week_end: addDays(week, 6), name: a.name, email: a.email, ...sums, pipeline_count: e ? e.pipeline_count : 0, pipeline_note: e ? e.pipeline_note : '' });
+  }
+  sendCsv(res, `tgb-week-${all ? 'all' : weeks[0]}.csv`, ['week_start', 'week_end', 'name', 'email', ...METRICS, 'pipeline_count', 'pipeline_note'], rows);
+});
+
+function pipelineAgents(userId) {
+  if (userId) {
+    const one = db.prepare("SELECT id, name, email, active FROM users WHERE id=? AND role='agent'").get(userId);
+    return one ? [one] : null;
+  }
+  return db.prepare("SELECT id, name, email, active FROM users WHERE role='agent' ORDER BY name").all();
+}
+function pipelineGrouped(userId) {
+  const agents = pipelineAgents(userId);
+  if (!agents) return null;
+  const stmt = db.prepare('SELECT id, address, notes, stage, created_at, updated_at FROM pipeline_entries WHERE user_id=? ORDER BY id DESC');
+  return agents.map(a => {
+    const entries = stmt.all(a.id);
+    return { id: a.id, name: a.name, email: a.email, active: a.active, count: entries.length, entries };
+  });
+}
+app.get('/api/admin/pipeline', requireAdmin, (req, res) => {
+  if (req.query.user_id !== undefined && !pipelineId(req.query.user_id)) return res.status(404).json({ error: 'Not found' });
+  const grouped = pipelineGrouped(req.query.user_id ? Number(req.query.user_id) : null);
+  if (!grouped) return res.status(404).json({ error: 'Not found' });
+  res.json({ agents: grouped });
+});
+app.get('/api/admin/pipeline.csv', requireAdmin, (req, res) => {
+  if (req.query.user_id !== undefined && !pipelineId(req.query.user_id)) return res.status(404).json({ error: 'Not found' });
+  const grouped = pipelineGrouped(req.query.user_id ? Number(req.query.user_id) : null);
+  if (!grouped) return res.status(404).json({ error: 'Not found' });
+  const rows = [];
+  for (const a of grouped) for (const e of [...a.entries].reverse()) rows.push({ name: a.name, email: a.email, address: e.address, notes: e.notes, stage: e.stage, created_at: e.created_at, updated_at: e.updated_at });
+  sendCsv(res, 'tgb-pipeline.csv', ['name', 'email', 'address', 'notes', 'stage', 'created_at', 'updated_at'], rows);
 });
 
 // --- pages ---
 const page = f => (req, res) => res.sendFile(path.join(__dirname, 'public', f));
+app.get('/manifest.webmanifest', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/manifest+json');
+  res.sendFile(path.join(__dirname, 'public', 'manifest.webmanifest'));
+});
+app.get('/sw.js', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/javascript');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
 app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); res.redirect(u.role === 'admin' ? '/admin' : '/me'); });
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));
 app.get('/admin', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); if (u.role !== 'admin') return res.redirect('/me'); page('admin.html')(req, res); });
-app.get('/tv', page('tv.html'));
+app.get('/tv', (req, res) => {
+  if (req.query.key != null && String(req.query.key) !== '') {
+    if (tvCodeOk(req.query.key)) { setTvCookie(req, res); return res.redirect('/tv'); }
+    return tvReject(req, res, false);
+  }
+  if (req.cookies.tv === getSetting('tv_key')) return page('tv.html')(req, res);
+  res.type('html').send(tvCodePage(''));
+});
+app.get('/tv/:code', (req, res) => {
+  if (tvCodeOk(req.params.code)) { setTvCookie(req, res); return res.redirect('/tv'); }
+  return tvReject(req, res, false);
+});
 app.use('/static', express.static(path.join(__dirname, 'public', 'static'), { maxAge: '1h' }));
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 

@@ -5,3 +5,4 @@ async function api(url,opts={}){const o={headers:{}};if(opts.body!==undefined){o
 const fmtWeek=(a,b)=>{const f=d=>new Date(d+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short'});return f(a)+' – '+f(b)};
 async function logout(){await api('/api/logout',{body:{}});location.href='/login'}
 async function changePw(){const c=prompt('Current password');if(c===null)return;const n=prompt('New password (8+ characters)');if(!n)return;try{await api('/api/password',{body:{current:c,next:n}});alert('Password changed');location.reload()}catch(e){alert(e.message)}}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

@@ -1,10 +1,21 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in · Harcourts TGB Group</title><link rel="stylesheet" href="/static/app.css"><meta name="theme-color" content="#0B1F3A"></head>
-<body style="background:var(--navy);min-height:100vh">
-<div class="wrap" style="max-width:420px;padding-top:8vh">
- <div class="card" style="border-top:5px solid var(--blue)">
-  <img src="/static/logo.png" alt="Harcourts TGB Group" style="width:100%;max-height:44px;object-fit:contain;object-position:left;margin-bottom:6px">
-  <h2 style="margin-top:8px">Team numbers</h2>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Sign in · Harcourts TGB Group</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TGB Dashboard">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/app.css"></head>
+<body class="login">
+<div class="wrap" style="max-width:420px">
+ <div class="card">
+  <img src="/static/logo.png" alt="Harcourts TGB Group" style="width:100%;max-height:48px;object-fit:contain;object-position:left;margin-bottom:8px">
+  <h2>Team numbers</h2>
+  <p class="muted" style="margin-top:-4px">Harcourts TGB Group</p>
   <form id="f">
    <label for="e">Email</label><input id="e" type="email" autocomplete="username" inputmode="email" required>
    <label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required>
@@ -18,4 +29,5 @@
 document.getElementById('f').onsubmit=async ev=>{ev.preventDefault();const err=document.getElementById('err');err.textContent='';
  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e.value,password:p.value})});
  const j=await r.json();if(!r.ok){err.textContent=j.error||'Sign in failed';return}location.href=j.role==='admin'?'/admin':'/me'};
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script></body></html>

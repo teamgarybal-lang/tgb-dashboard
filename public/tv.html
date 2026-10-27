@@ -1,49 +1,91 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Team board · Harcourts TGB Group</title><meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="apple-mobile-web-app-title" content="TGB Dashboard">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
-:root{--blue:#00ADEF;--navy:#071630;--panel:#0F2547;--line:#1E3A66;--mut:#8FA6C7}
-*{box-sizing:border-box}html,body{margin:0;height:100%}
-body{background:var(--navy);color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:clamp(14px,1.15vw,28px);overflow:hidden}
-.top{display:flex;justify-content:space-between;align-items:center;padding:1.2vh 2vw;border-bottom:.5vh solid var(--blue)}
-.brand{font-size:2.2em;font-weight:800;letter-spacing:-.02em}.brand span{color:var(--blue);font-weight:300;margin-left:.35em}
-.meta{text-align:right;color:var(--mut)}.meta b{color:#fff;font-size:1.6em;display:block}
-.main{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:1.5vw;padding:2vh 2vw;height:calc(100% - 11vh)}
-.panel{background:var(--panel);border-radius:1vw;padding:2vh 1.4vw;overflow:hidden;display:flex;flex-direction:column}
-h2{margin:0 0 1.4vh;font-size:1.1em;text-transform:uppercase;letter-spacing:.08em;color:var(--blue)}
-.m{margin-bottom:2.3vh}.m .lab{display:flex;justify-content:space-between;align-items:baseline}.m .v{font-size:2.2em;font-weight:800}.m .t{color:var(--mut)}
-.bar{height:1.6vh;background:#0A1B36;border-radius:99px;overflow:hidden;margin-top:.6vh}.bar i{display:block;height:100%;background:linear-gradient(90deg,#00ADEF,#5FD3FF);border-radius:99px;transition:width .8s}
-.big{display:grid;grid-template-columns:1fr 1fr;gap:1vw;margin-top:auto}.big div{background:#0A1B36;border-radius:.8vw;padding:1.4vh 1vw}.big b{font-size:2.6em;display:block;color:#fff}.big span{color:var(--mut)}
-.list{overflow:hidden}.w{display:flex;gap:.8vw;align-items:flex-start;padding:1vh 0;border-bottom:1px solid var(--line)}
-.dot{width:.9em;height:.9em;border-radius:50%;background:#2EE27A;margin-top:.35em;flex:none;box-shadow:0 0 .6em #2EE27A}.dot.off{background:#3A4E6E;box-shadow:none}
-.w .n{font-weight:700}.w .s{color:var(--mut);font-size:.9em}
-.lb{display:grid;grid-template-columns:2.2em 1fr auto;gap:.6vw;align-items:center;padding:1vh 0;border-bottom:1px solid var(--line)}
-.rk{font-weight:800;color:var(--blue);font-size:1.3em}.sc{font-weight:800;font-size:1.3em}.sm{color:var(--mut);font-size:.8em}
-.empty{color:var(--mut);font-style:italic}
-#err{position:fixed;bottom:1vh;right:1vw;color:#F87171;font-size:.8em}
+:root{--blue:#00ADEF;--navy:#071630;--panel:#10284C;--line:rgba(255,255,255,.08);--mut:#9BB0CC;
+ --c-appr_done:#F5C451;--c-appr_booked:#B79CFF;--c-cold_calls:#5FD3FF;--c-door_knocks:#FF8A6A;--c-letter_drops:#5EE0A0}
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}
+body{background:radial-gradient(900px 480px at 8% -10%, rgba(0,173,239,.28), transparent 50%),linear-gradient(165deg,#071630,#0B1F3A 60%,#0A2748);color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.top{height:92px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:linear-gradient(90deg,rgba(255,255,255,.04),transparent)}
+.brand{font-size:36px;font-weight:800;letter-spacing:-.02em;color:#fff;line-height:1}
+.brand span{color:#00ADEF;font-weight:300;margin-left:.4em}
+.meta{text-align:right}.meta b{display:block;font-size:34px;letter-spacing:-.03em;line-height:1}.meta span{color:var(--mut);font-size:18px}
+.main{height:calc(100% - 92px);display:grid;grid-template-columns:500px 1fr 470px;gap:18px;padding:8px 22px 20px}
+.panel{background:linear-gradient(180deg,rgba(16,40,76,.96),rgba(10,28,54,.96));border:1px solid rgba(255,255,255,.08);border-radius:22px;padding:14px 16px 12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 40px rgba(0,0,0,.22)}
+h2{margin:0 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:.14em;color:#8FD9F8}
+.month-block{margin-top:72px}
+.m{margin-bottom:6px}.m .lab{display:flex;justify-content:space-between;align-items:flex-end;gap:8px}
+.m .name{font-size:14px;font-weight:700}.m .v{font-size:30px;font-weight:800;letter-spacing:-.04em;line-height:.9}.m .t{color:var(--mut);font-size:14px;font-weight:600}
+.bar{height:7px;background:rgba(0,0,0,.28);border-radius:99px;overflow:hidden;margin-top:3px}.bar i{display:block;height:100%;border-radius:99px}
+.c-appr_done .name,.c-appr_done .v{color:var(--c-appr_done)}.c-appr_done .bar i{background:linear-gradient(90deg,#F6C445,#E39B12)}
+.c-appr_booked .name,.c-appr_booked .v{color:var(--c-appr_booked)}.c-appr_booked .bar i{background:linear-gradient(90deg,#C4B5FD,#7C4DFF)}
+.c-cold_calls .name,.c-cold_calls .v{color:var(--c-cold_calls)}.c-cold_calls .bar i{background:linear-gradient(90deg,#7DDCFF,#00ADEF)}
+.c-door_knocks .name,.c-door_knocks .v{color:var(--c-door_knocks)}.c-door_knocks .bar i{background:linear-gradient(90deg,#FFB199,#FF5A36)}
+.c-letter_drops .name,.c-letter_drops .v{color:var(--c-letter_drops)}.c-letter_drops .bar i{background:linear-gradient(90deg,#8AF0C2,#1FA971)}
+.big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:auto}.big div{background:rgba(0,0,0,.22);border-radius:14px;padding:10px 12px 8px}
+.big b{font-size:34px;display:block;letter-spacing:-.04em;line-height:1}.big span{color:var(--mut);font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+table{width:100%;border-collapse:collapse;margin-top:4px}th,td{padding:8px 4px;text-align:right;font-variant-numeric:tabular-nums}
+th{color:var(--mut);font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+td.lab,th.lab{text-align:left;font-weight:800;font-size:16px}
+td{font-size:28px;font-weight:800;letter-spacing:-.03em}
+td.today,th.today{background:rgba(0,173,239,.18);border-radius:8px}
+td.future{color:rgba(255,255,255,.28)}
+tr.c-appr_done td.lab{color:var(--c-appr_done)}tr.c-appr_booked td.lab{color:var(--c-appr_booked)}tr.c-cold_calls td.lab{color:var(--c-cold_calls)}tr.c-door_knocks td.lab{color:var(--c-door_knocks)}tr.c-letter_drops td.lab{color:var(--c-letter_drops)}
+.cap{color:var(--mut);font-size:14px;margin:-4px 0 10px}
+.lb{display:grid;grid-template-columns:52px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border-radius:14px;margin-bottom:8px;background:rgba(0,0,0,.18)}
+.lb .rk{font-size:26px;font-weight:800}.lb .n{font-size:22px;font-weight:800;letter-spacing:-.02em}.lb .sm{color:var(--mut);font-size:13px;margin-top:2px}.lb .sc{font-size:30px;font-weight:800;letter-spacing:-.04em}
+.lb.gold{background:linear-gradient(90deg,#FFE9A3,#F5C451);color:#3A2A04}.lb.gold .sm{color:#6A5316}
+.lb.silver{background:linear-gradient(90deg,#F7F9FC,#D5DEE8);color:#1C2836}.lb.silver .sm{color:#526173}
+.lb.bronze{background:linear-gradient(90deg,#FFE0C2,#E0A36A);color:#3D2612}.lb.bronze .sm{color:#6D4B2E}
+.empty{color:var(--mut);font-style:italic;font-size:18px}
+.quote{margin-top:auto;padding-top:18px;border-top:1px solid rgba(255,255,255,.1)}
+.quote .kicker{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#8FD9F8;font-weight:800;margin-bottom:10px}
+.quote p{margin:0;font-size:30px;line-height:1.28;font-style:italic;font-weight:650;letter-spacing:-.02em}
+.quote .by{margin-top:12px;font-size:18px;font-weight:800;letter-spacing:.04em;color:#F5C451}
+#err{position:fixed;bottom:10px;right:16px;color:#FCA5A5;font-size:14px}
 </style></head><body>
 <div class="top"><div class="brand">Harcourts<span>TGB Group</span></div><div class="meta"><b id="clock"></b><span id="wk"></span></div></div>
 <div class="main">
- <div class="panel"><h2>Team this week</h2><div id="metrics"></div>
-  <div class="big"><div><span>Numbers in</span><b id="inn">–</b></div><div><span>Pipeline (30–90 days)</span><b id="pipe">–</b></div></div></div>
- <div class="panel"><h2>Who's working today</h2><div class="list" id="working"></div></div>
- <div class="panel"><h2>Leaderboard</h2><div class="sm" style="margin:-.8vh 0 1vh">Score: knocks + calls + 20 per appraisal booked + 30 per appraisal done</div><div id="lb"></div></div>
+ <div class="panel" id="left"><h2>Team this week</h2><div id="metrics"></div>
+  <div class="month-block"><h2>Team this month</h2><div class="cap" id="monthCap"></div><div id="month"></div></div>
+  <div class="big"><div><span>Numbers in</span><b id="inn">–</b></div><div><span>Pipeline</span><b id="pipe">–</b></div></div></div>
+ <div class="panel"><h2>Daily this week</h2><div class="cap">Team total for each day, Monday to Sunday</div><div id="daily"></div><div class="quote" id="quote"></div></div>
+ <div class="panel"><h2>Leaderboard</h2><div class="cap">30 per appraisal done · 20 per booked · calls, knocks and drops count as 1</div><div id="lb"></div></div>
 </div>
 <div id="err"></div>
 <script>
-const key=new URLSearchParams(location.search).get('key')||'';const M=['door_knocks','cold_calls','appr_booked','appr_done'];
+const key=new URLSearchParams(location.search).get('key')||'';
+const M=['appr_done','appr_booked','cold_calls','door_knocks','letter_drops'];
+const DOW=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function tick(){$c=document.getElementById('clock');$c.textContent=new Date().toLocaleTimeString('en-NZ',{timeZone:'Pacific/Auckland',hour:'numeric',minute:'2-digit'})}
-async function load(){try{const r=await fetch('/api/tv?key='+encodeURIComponent(key),{cache:'no-store'});if(r.status===403){document.body.innerHTML='<div style="padding:10vh;text-align:center;font-size:2em">This TV link has expired or is wrong.<br><span style="color:#8FA6C7;font-size:.6em">Open the TV link from the admin page.</span></div>';return}
+function tick(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-NZ',{timeZone:'Pacific/Auckland',hour:'numeric',minute:'2-digit'})}
+async function load(){try{
+ const r=await fetch('/api/tv'+(key?'?key='+encodeURIComponent(key):''),{cache:'no-store'});
+ if(r.status===403||r.status===429){location.replace('/tv');return}
  const d=await r.json();const f=x=>new Date(x+'T00:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short'});
  document.getElementById('wk').textContent=`Week ${f(d.week)} – ${f(d.week_end)}`;
- document.getElementById('metrics').innerHTML=M.map(m=>{const tg=d.targets[m]||0,v=d.totals[m],p=tg?Math.min(100,v/tg*100):0;return `<div class="m"><div class="lab"><span>${d.labels[m]}</span><span><span class="v">${v}</span><span class="t">${tg?' / '+tg:''}</span></span></div><div class="bar"><i style="width:${p}%"></i></div></div>`}).join('');
- document.getElementById('inn').textContent=`${d.entered_count}/${d.agent_count}`;document.getElementById('pipe').textContent=d.totals.pipeline_count;
- const w=[...d.rows].sort((a,b)=>(b.working_today-a.working_today)||a.name.localeCompare(b.name));
- document.getElementById('working').innerHTML=w.length?w.slice(0,14).map(r=>`<div class="w"><div class="dot ${r.working_today?'':'off'}"></div><div><div class="n">${esc(r.name)}</div><div class="s">${r.working_today?(esc(r.status)||'Checked in'):'Not checked in yet'}</div></div></div>`).join('')+(w.length>14?`<div class="s" style="padding-top:1vh">+${w.length-14} more</div>`:''):'<div class="empty">No agents added yet</div>';
- const lb=[...d.rows].filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,10);
- document.getElementById('lb').innerHTML=lb.length?lb.map((r,i)=>`<div class="lb"><div class="rk">${i+1}</div><div><div class="n" style="font-weight:700">${esc(r.name)}</div><div class="sm">${r.door_knocks} knocks · ${r.cold_calls} calls · ${r.appr_booked} booked · ${r.appr_done} done</div></div><div class="sc">${r.score}</div></div>`).join(''):'<div class="empty">No numbers in yet this week</div>';
- document.getElementById('err').textContent=''}catch(e){document.getElementById('err').textContent='Reconnecting…'}}
+ const rows=(totals,targets)=>M.map(m=>{const tg=targets[m]||0,v=totals[m]||0,p=tg?Math.min(100,v/tg*100):0;return `<div class="m c-${m}"><div class="lab"><span class="name">${esc(d.labels[m])}</span><span><span class="v">${v}</span>${tg?`<span class="t"> / ${tg}</span>`:''}</span></div>${tg?`<div class="bar"><i style="width:${p}%"></i></div>`:''}</div>`}).join('');
+ document.getElementById('metrics').innerHTML=rows(d.totals,d.targets);
+ const monthName=d.month?new Date(d.month+'-01T00:00:00').toLocaleDateString('en-NZ',{month:'long'}):'';
+ document.getElementById('monthCap').textContent=d.month_targets?`${monthName} · target = weekly × ${d.month_days} days ÷ 7`:'';
+ document.getElementById('month').innerHTML=rows(d.month_totals||{},d.month_targets||{});
+ document.getElementById('inn').textContent=`${d.entered_count}/${d.agent_count}`;
+ document.getElementById('pipe').textContent=d.totals.pipeline_count;
+ const days=d.daily||[];
+ document.getElementById('daily').innerHTML=`<table><tr><th class="lab"></th>${days.map((day,i)=>`<th class="${day.day===d.today?'today':''}">${DOW[i]}</th>`).join('')}</tr>`+
+  M.map(m=>`<tr class="c-${m}"><td class="lab">${esc(d.labels[m])}</td>${days.map(day=>`<td class="${day.day===d.today?'today':''}${day.day>d.today?' future':''}">${day[m]||0}</td>`).join('')}</tr>`).join('')+'</table>';
+ const q=d.quote||{};
+ document.getElementById('quote').innerHTML=q.text?`<div class="kicker">Quote of the day</div><p>“${esc(q.text)}”</p><div class="by">${esc(q.author)}</div>`:'';
+ const lb=[...d.rows].filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,8);
+ const medal=['gold','silver','bronze'];
+ document.getElementById('lb').innerHTML=lb.length?lb.map((r,i)=>`<div class="lb ${medal[i]||''}"><div class="rk">${i+1}</div><div><div class="n">${esc(r.name)}</div><div class="sm">${r.appr_done} done · ${r.appr_booked} booked · ${r.cold_calls} calls · ${r.door_knocks} knocks · ${r.letter_drops} drops</div></div><div class="sc">${r.score}</div></div>`).join(''):'<div class="empty">No numbers in yet this week</div>';
+ document.getElementById('err').textContent='';
+}catch(e){document.getElementById('err').textContent='Reconnecting…'}}
 tick();setInterval(tick,10000);load();setInterval(load,12000);
-// reload the page every 6 hours to pick up updates
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 setTimeout(()=>location.reload(),6*3600e3);
 </script></body></html>
