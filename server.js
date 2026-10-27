@@ -345,12 +345,12 @@ app.get('/api/admin/summary', requireAdmin, (req, res) => {
     const cur = monthData(month); const prev = monthData(addMonths(month, -1));
     const prevBy = Object.fromEntries(prev.rows.map(r => [r.id, r]));
     cur.rows.forEach(r => { const p = prevBy[r.id] || {}; r.last = {}; METRICS.forEach(m => r.last[m] = p[m] || 0); });
-    res.json({ ...cur, last_totals: prev.totals, last_month: prev.month, weeks, months, tv_key: getSetting('tv_key'), missing: cur.rows.filter(r => !r.entered).map(r => r.name), targets_apply: false });
+    res.json({ ...cur, last_totals: prev.totals, last_month: prev.month, weeks, months, tv_key: getSetting('tv_key'), missing: cur.rows.filter(r => !r.entered).map(r => r.name), targets_apply: false, me: { id: req.user.id, must_change: !!req.user.must_change } });
   } else {
     const w = validWeek(req.query.week); const cur = teamData(w); const prev = teamData(addDays(w, -7));
     const prevBy = Object.fromEntries(prev.rows.map(r => [r.id, r]));
     cur.rows.forEach(r => { const p = prevBy[r.id] || {}; r.last = {}; METRICS.forEach(m => r.last[m] = p[m] || 0); });
-    res.json({ ...cur, last_totals: prev.totals, last_week: prev.week, weeks, months, tv_key: getSetting('tv_key'), missing: cur.rows.filter(r => !r.entered).map(r => r.name), targets_apply: true });
+    res.json({ ...cur, last_totals: prev.totals, last_week: prev.week, weeks, months, tv_key: getSetting('tv_key'), missing: cur.rows.filter(r => !r.entered).map(r => r.name), targets_apply: true, me: { id: req.user.id, must_change: !!req.user.must_change } });
   }
 });
 app.get('/api/admin/users', requireAdmin, (req, res) => res.json(db.prepare('SELECT id,name,email,role,active,must_change,created_at FROM users ORDER BY role, name').all()));
