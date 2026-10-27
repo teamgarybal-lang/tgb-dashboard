@@ -2,9 +2,9 @@
 
 Node.js (Express) + SQLite (`data.db`). Port 3100. Run under pm2 as `tgb-dashboard` (`ecosystem.config.js`).
 
-- `/login` – agents and admin sign in (email + password, 180-day session cookie, bcrypt-hashed passwords)
+- `/login` – agents and admins sign in (email + password, 180-day session cookie, bcrypt-hashed passwords)
 - `/me` – agent phone view (+1 buttons, editable totals, today status, pipeline, own history)
-- `/admin` – Gary: team totals vs last week, per-agent table, week picker, missing list, CSV export, add/reset/deactivate/delete agents, weekly targets, TV key
+- `/admin` – team totals vs last week, per-agent table, week picker, missing list, CSV export, add agents or admins, reset/deactivate/delete other accounts (not your own, and not the last active admin), weekly targets, TV key
 - `/tv?key=...` – office TV board, no login, refreshes every 12 s. Key is regenerated from /admin.
 - Weeks run Monday–Sunday, Pacific/Auckland time. Pipeline carries forward into a new week until updated.
 - Admin temporary password: `ADMIN_PASSWORD.txt` (change it after first sign-in).

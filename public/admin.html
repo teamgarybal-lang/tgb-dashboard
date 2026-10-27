@@ -15,12 +15,13 @@
  <div class="card"><h2>Per agent</h2><p class="muted">Small numbers show the change vs the week before. Tap a name for that agent's history.</p>
   <div class="scroll"><table id="tbl"></table></div></div>
  <div class="card" id="histCard" style="display:none"><div class="row" style="justify-content:space-between"><h2 id="histTitle" style="margin:0"></h2><button class="sec small" onclick="histCard.style.display='none'">Close</button></div><div class="scroll"><table id="histTbl"></table></div></div>
- <div class="card"><h2>Agents</h2>
+ <div class="card"><h2>Users</h2>
   <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
    <div><label>Name</label><input id="nName"></div><div><label>Email</label><input id="nEmail" type="email"></div>
+   <div><label>Role</label><select id="nRole"><option value="agent" selected>Agent</option><option value="admin">Admin</option></select></div>
    <div><label>Temporary password</label><div class="row" style="flex-wrap:nowrap"><input id="nPw"><button class="sec small" onclick="nPw.value=genPw()">Generate</button></div></div>
   </div>
-  <button style="margin-top:12px" onclick="addAgent()">Add agent</button><div class="err" id="addErr"></div><div class="okmsg" id="addOk"></div>
+  <button style="margin-top:12px" onclick="addUser()">Add user</button><div class="err" id="addErr"></div><div class="okmsg" id="addOk"></div>
   <div class="scroll" style="margin-top:10px"><table id="users"></table></div>
  </div>
  <div class="card"><h2>Weekly team targets</h2><p class="muted">Used for the progress bars on the TV and agent screens.</p>
@@ -46,13 +47,14 @@ async function load(){D=await api('/api/admin/summary'+(curWeek?'?week='+curWeek
  $('#targets').innerHTML=M.map(m=>`<div><label>${L[m]}</label><input type="number" min="0" id="t_${m}" value="${D.targets[m]}"></div>`).join('');
  const u=`${location.origin}/tv?key=${D.tv_key}`;$('#tvurl').value=u;$('#tvopen').href=u;
  loadUsers()}
-async function loadUsers(){const us=await api('/api/admin/users');const me=us.find(x=>x.role==='admin'&&x.email.toLowerCase()==='gary.bal@harcourts.co.nz');if(me&&me.must_change)$('#pwb').style.display='block';
- $('#users').innerHTML='<tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr>'+us.map(x=>`<tr><td>${esc(x.name)}${x.role==='admin'?' <span class="pill on">admin</span>':''}</td><td>${esc(x.email)}</td><td>${x.active?'Active':'Inactive'}${x.must_change?' · temp password':''}</td><td>${x.role==='admin'?'':`<div class="row"><button class="sec small" onclick="resetPw(${x.id})">Reset password</button><button class="sec small" onclick="setActive(${x.id},${x.active?0:1})">${x.active?'Deactivate':'Activate'}</button><button class="danger small" onclick="del(${x.id},'${esc(x.name).replace(/'/g,'')}')">Delete</button></div>`}</td></tr>`).join('')}
-async function addAgent(){$('#addErr').textContent='';$('#addOk').textContent='';try{const pw=nPw.value||genPw();await api('/api/admin/users',{body:{name:nName.value,email:nEmail.value,password:pw}});
- $('#addOk').textContent=`Added. Give ${nName.value} this to sign in: ${location.origin}/login · ${nEmail.value} · temporary password ${pw}`;nName.value=nEmail.value=nPw.value='';load()}catch(e){$('#addErr').textContent=e.message}}
+async function loadUsers(){const us=await api('/api/admin/users');const me=us.find(x=>D.me&&Number(x.id)===Number(D.me.id));$('#pwb').style.display=me&&me.must_change?'block':'none';
+ const actions=x=>me&&Number(x.id)===Number(me.id)?'<span class="muted">Signed in</span>':`<div class="row"><button class="sec small" onclick="resetPw(${x.id})">Reset password</button><button class="sec small" onclick="setActive(${x.id},${x.active?0:1})">${x.active?'Deactivate':'Activate'}</button><button class="danger small" onclick="del(${x.id},'${esc(x.name).replace(/'/g,'')}')">Delete</button></div>`;
+ $('#users').innerHTML='<tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr>'+us.map(x=>`<tr><td>${esc(x.name)}${x.role==='admin'?' <span class="pill on">admin</span>':''}</td><td>${esc(x.email)}</td><td>${x.active?'Active':'Inactive'}${x.must_change?' · temp password':''}</td><td>${actions(x)}</td></tr>`).join('')}
+async function addUser(){$('#addErr').textContent='';$('#addOk').textContent='';try{const pw=nPw.value||genPw();const role=nRole.value==='admin'?'admin':'agent';await api('/api/admin/users',{body:{name:nName.value,email:nEmail.value,password:pw,role}});
+ $('#addOk').textContent=`Added. Give ${nName.value} this to sign in: ${location.origin}/login · ${nEmail.value} · temporary password ${pw}`;nName.value=nEmail.value=nPw.value='';nRole.value='agent';load()}catch(e){$('#addErr').textContent=e.message}}
 async function resetPw(id){const pw=prompt('New temporary password (6+ characters):',genPw());if(!pw)return;try{await api(`/api/admin/users/${id}/reset`,{body:{password:pw}});alert('Password reset. New temporary password: '+pw);loadUsers()}catch(e){alert(e.message)}}
-async function setActive(id,a){await api(`/api/admin/users/${id}/active`,{body:{active:!!a}});load()}
-async function del(id,n){if(!confirm(`Delete ${n} and all their numbers? This can't be undone. (Deactivate keeps their history.)`))return;await api(`/api/admin/users/${id}`,{method:'DELETE'});load()}
+async function setActive(id,a){try{await api(`/api/admin/users/${id}/active`,{body:{active:!!a}});load()}catch(e){alert(e.message)}}
+async function del(id,n){if(!confirm(`Delete ${n} and all their numbers? This can't be undone. (Deactivate keeps their history.)`))return;try{await api(`/api/admin/users/${id}`,{method:'DELETE'});load()}catch(e){alert(e.message)}}
 async function saveTargets(){const b={};M.forEach(m=>b[m]=$('#t_'+m).value);await api('/api/admin/targets',{body:b});$('#tOk').textContent='Saved';setTimeout(()=>$('#tOk').textContent='',2000);load()}
 async function regen(){if(!confirm('Make a new TV key? The old TV link will stop working.'))return;await api('/api/admin/tvkey',{body:{}});load()}
 async function hist(id,n){const h=await api(`/api/admin/agent/${id}/history`);$('#histTitle').textContent=n+' – weekly history';histCard.style.display='block';
