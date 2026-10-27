@@ -319,7 +319,7 @@ function enteredMetrics(r) { return METRICS.some(m => (r[m] || 0) > 0); }
 
 // ---- app ----
 const app = express();
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '50kb' }));
 app.use(cookieParser());
@@ -608,27 +608,56 @@ app.get('/api/admin/summary', requireAdmin, (req, res) => {
   }
 });
 app.get('/api/admin/users', requireAdmin, (req, res) => res.json(db.prepare('SELECT id,name,email,role,active,must_change,created_at FROM users ORDER BY role, name').all()));
+function httpError(status, error) { const e = new Error(error); e.status = status; return e; }
+function assertKeepsActiveAdmin(u) {
+  if (!u || u.role !== 'admin' || !u.active) return;
+  const others = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin' AND active=1 AND id!=?").get(u.id).n;
+  if (others < 1) throw httpError(400, 'There must be at least one active admin');
+}
 app.post('/api/admin/users', requireAdmin, (req, res) => {
-  const { name, email, password } = req.body || {};
+  const { name, email, password, role } = req.body || {};
+  const nextRole = role == null ? 'agent' : role;
+  if (nextRole !== 'agent' && nextRole !== 'admin') return res.status(400).json({ error: 'Role must be agent or admin' });
   if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || ''))) return res.status(400).json({ error: 'Name and a valid email are needed' });
   if (String(password || '').length < 6) return res.status(400).json({ error: 'Temporary password must be at least 6 characters' });
-  try { const r = db.prepare("INSERT INTO users(name,email,pass_hash,role) VALUES(?,?,?,'agent')").run(String(name).trim().slice(0, 80), String(email).trim(), bcrypt.hashSync(String(password), 10)); res.json({ ok: true, id: r.lastInsertRowid }); }
+  try { const r = db.prepare('INSERT INTO users(name,email,pass_hash,role,must_change) VALUES(?,?,?,?,1)').run(String(name).trim().slice(0, 80), String(email).trim(), bcrypt.hashSync(String(password), 10), nextRole); res.json({ ok: true, id: r.lastInsertRowid }); }
   catch (e) { res.status(400).json({ error: 'That email already has an account' }); }
 });
 app.post('/api/admin/users/:id/reset', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (id === Number(req.user.id)) return res.status(400).json({ error: "You can't reset your own password here" });
   const pw = String((req.body || {}).password || ''); if (pw.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  db.prepare('UPDATE users SET pass_hash=?, must_change=1 WHERE id=?').run(bcrypt.hashSync(pw, 10), req.params.id);
-  db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.params.id); res.json({ ok: true });
+  const u = db.prepare('SELECT id FROM users WHERE id=?').get(id); if (!u) return res.status(404).json({ error: 'Not found' });
+  db.prepare('UPDATE users SET pass_hash=?, must_change=1 WHERE id=?').run(bcrypt.hashSync(pw, 10), id);
+  db.prepare('DELETE FROM sessions WHERE user_id=?').run(id); res.json({ ok: true });
 });
 app.post('/api/admin/users/:id/active', requireAdmin, (req, res) => {
-  if (Number(req.params.id) === req.user.id) return res.status(400).json({ error: "You can't deactivate yourself" });
-  db.prepare('UPDATE users SET active=? WHERE id=?').run((req.body || {}).active ? 1 : 0, req.params.id);
-  if (!(req.body || {}).active) db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.params.id); res.json({ ok: true });
+  const id = Number(req.params.id);
+  const active = (req.body || {}).active ? 1 : 0;
+  try {
+    db.transaction(() => {
+      const u = db.prepare('SELECT id, role, active FROM users WHERE id=?').get(id);
+      if (!u) throw httpError(404, 'Not found');
+      if (!active) assertKeepsActiveAdmin(u);
+      if (id === Number(req.user.id)) throw httpError(400, "You can't deactivate yourself");
+      db.prepare('UPDATE users SET active=? WHERE id=?').run(active, id);
+      if (!active) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+    }).immediate();
+  } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
+  res.json({ ok: true });
 });
 app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
-  const id = Number(req.params.id); if (id === req.user.id) return res.status(400).json({ error: "You can't delete yourself" });
-  const u = db.prepare('SELECT role FROM users WHERE id=?').get(id); if (!u) return res.status(404).json({ error: 'Not found' });
-  db.transaction(() => { ['sessions', 'entries', 'activity'].forEach(t => db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(id)); db.prepare('DELETE FROM users WHERE id=?').run(id); })();
+  const id = Number(req.params.id);
+  try {
+    db.transaction(() => {
+      const u = db.prepare('SELECT id, role, active FROM users WHERE id=?').get(id);
+      if (!u) throw httpError(404, 'Not found');
+      assertKeepsActiveAdmin(u);
+      if (id === Number(req.user.id)) throw httpError(400, "You can't delete yourself");
+      ['sessions', 'entries', 'activity'].forEach(t => db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(id));
+      db.prepare('DELETE FROM users WHERE id=?').run(id);
+    }).immediate();
+  } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
   res.json({ ok: true });
 });
 app.get('/api/admin/agent/:id/history', requireAdmin, (req, res) => res.json(db.prepare('SELECT * FROM day_entries WHERE user_id=? ORDER BY day DESC LIMIT 120').all(req.params.id)));

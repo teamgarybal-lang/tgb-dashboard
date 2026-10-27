@@ -28,6 +28,10 @@ button:active{transform:scale(.98)}
 .metric{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;padding:11px 0 11px 12px;border-bottom:1px solid var(--line);border-left:4px solid var(--blue)}
 .metric:last-child{border-bottom:0}
 .metric .name{font-weight:700}.metric .sub{font-size:12px;color:var(--mut)}
+#pipeBoard,#pipeList{min-width:0}
+#pipeBoard .metric,#pipeList .metric{min-width:0}
+#pipeBoard .metric > div:first-child,#pipeList .metric > div:first-child{min-width:0}
+#pipeBoard .name,#pipeBoard .sub,#pipeList .name,#pipeList .sub{overflow-wrap:anywhere;word-break:break-word}
 .metric .ctl{display:flex;align-items:center;gap:6px}
 .metric input{width:78px;text-align:center;font-size:22px;font-weight:800;padding:8px}
 .m-appr_done{border-left-color:var(--c-appr_done)}.m-appr_booked{border-left-color:var(--c-appr_booked)}.m-cold_calls{border-left-color:var(--c-cold_calls)}.m-door_knocks{border-left-color:var(--c-door_knocks)}.m-letter_drops{border-left-color:var(--c-letter_drops)}
