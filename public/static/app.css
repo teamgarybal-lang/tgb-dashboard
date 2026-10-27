@@ -1,0 +1,36 @@
+:root{--blue:#00ADEF;--navy:#0B1F3A;--navy2:#132B4D;--bg:#F3F6FA;--ink:#0B1F3A;--mut:#5B6B80;--ok:#16A34A;--warn:#F59E0B;--line:#DCE3EC}
+*{box-sizing:border-box}html,body{margin:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
+header.top{background:#fff;border-bottom:4px solid var(--blue);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;z-index:5}
+header.top img{height:26px;max-width:60vw;object-fit:contain;object-position:left}
+header.top .who{font-size:13px;color:var(--mut);text-align:right}
+a{color:var(--blue)}
+.wrap{max-width:720px;margin:0 auto;padding:14px}
+.wide{max-width:1200px}
+.card{background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(11,31,58,.08)}
+h1,h2,h3{margin:0 0 10px;color:var(--navy)}h2{font-size:18px}h3{font-size:15px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea{font-family:inherit;width:100%;font-size:16px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+input:focus,textarea:focus{outline:2px solid var(--blue);border-color:var(--blue)}
+button,.btn{font-size:16px;font-weight:600;border:0;border-radius:10px;padding:12px 16px;background:var(--blue);color:#fff;cursor:pointer;text-decoration:none;display:inline-block;text-align:center}
+button.sec,.btn.sec{background:#E6F7FD;color:var(--navy)}button.dark{background:var(--navy)}button.danger{background:#FEE2E2;color:#991B1B}
+button.small{font-size:13px;padding:7px 10px}
+button:active{transform:scale(.97)}
+.err{color:#B91C1C;font-size:14px;min-height:18px;margin-top:8px}.okmsg{color:var(--ok);font-size:14px;min-height:18px;margin-top:8px}
+.metric{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.metric:last-child{border-bottom:0}
+.metric .name{font-weight:600}.metric .sub{font-size:12px;color:var(--mut)}
+.metric .ctl{display:flex;align-items:center;gap:6px}
+.metric input{width:78px;text-align:center;font-size:20px;font-weight:700;padding:8px}
+.tap{width:56px;height:52px;font-size:20px;padding:0}.minus{width:40px;height:52px;padding:0;background:#E6F7FD;color:var(--navy)}
+.pill{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;border-radius:99px}
+.pill.on{background:#DCFCE7;color:#166534}.pill.off{background:#F1F5F9;color:#64748B}
+.bar{height:10px;background:#E2E8F0;border-radius:99px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--blue);border-radius:99px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--bg);border-radius:10px;padding:10px}.stat b{font-size:22px;display:block}.stat span{font-size:12px;color:var(--mut)}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{font-size:12px;color:var(--mut);font-weight:600;white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.up{color:var(--ok);font-size:11px}.down{color:#DC2626;font-size:11px}
+.scroll{overflow-x:auto}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--mut);font-size:13px}
+.banner{background:#FFF7ED;border:1px solid #FED7AA;color:#9A3412;padding:12px;border-radius:10px;margin-bottom:14px;font-size:14px}

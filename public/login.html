@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · Harcourts TGB Group</title><link rel="stylesheet" href="/static/app.css"><meta name="theme-color" content="#0B1F3A"></head>
+<body style="background:var(--navy);min-height:100vh">
+<div class="wrap" style="max-width:420px;padding-top:8vh">
+ <div class="card" style="border-top:5px solid var(--blue)">
+  <img src="/static/logo.png" alt="Harcourts TGB Group" style="width:100%;max-height:44px;object-fit:contain;object-position:left;margin-bottom:6px">
+  <h2 style="margin-top:8px">Team numbers</h2>
+  <form id="f">
+   <label for="e">Email</label><input id="e" type="email" autocomplete="username" inputmode="email" required>
+   <label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required>
+   <button style="width:100%;margin-top:16px">Sign in</button>
+   <div class="err" id="err"></div>
+  </form>
+  <p class="muted">You'll stay signed in on this phone. Forgot your password? Ask Gary to reset it.</p>
+ </div>
+</div>
+<script>
+document.getElementById('f').onsubmit=async ev=>{ev.preventDefault();const err=document.getElementById('err');err.textContent='';
+ const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e.value,password:p.value})});
+ const j=await r.json();if(!r.ok){err.textContent=j.error||'Sign in failed';return}location.href=j.role==='admin'?'/admin':'/me'};
+</script></body></html>

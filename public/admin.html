@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin · Harcourts TGB Group</title><link rel="stylesheet" href="/static/app.css"><meta name="theme-color" content="#0B1F3A"></head>
+<body>
+<header class="top"><img src="/static/logo.png" alt="Harcourts TGB Group"><div class="who"><b>Admin</b> · <a href="#" onclick="logout();return false">Sign out</a></div></header>
+<div class="wrap wide">
+ <div id="pwb" class="banner" style="display:none">You're using the temporary admin password. <a href="#" onclick="changePw();return false">Set your own password</a>.</div>
+ <div class="card"><div class="row" style="justify-content:space-between">
+  <h2 style="margin:0">Team numbers</h2>
+  <div class="row"><select id="week" style="width:auto"></select>
+  <a class="btn sec" id="csv" href="#">Export week CSV</a><a class="btn sec" href="/api/admin/export.csv?all=1">Export all weeks</a></div></div>
+  <p class="muted" id="sub"></p>
+  <div id="totals" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
+ </div>
+ <div class="card"><h3>Haven't entered numbers this week</h3><div id="missing" class="muted"></div></div>
+ <div class="card"><h2>Per agent</h2><p class="muted">Small numbers show the change vs the week before. Tap a name for that agent's history.</p>
+  <div class="scroll"><table id="tbl"></table></div></div>
+ <div class="card" id="histCard" style="display:none"><div class="row" style="justify-content:space-between"><h2 id="histTitle" style="margin:0"></h2><button class="sec small" onclick="histCard.style.display='none'">Close</button></div><div class="scroll"><table id="histTbl"></table></div></div>
+ <div class="card"><h2>Agents</h2>
+  <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+   <div><label>Name</label><input id="nName"></div><div><label>Email</label><input id="nEmail" type="email"></div>
+   <div><label>Temporary password</label><div class="row" style="flex-wrap:nowrap"><input id="nPw"><button class="sec small" onclick="nPw.value=genPw()">Generate</button></div></div>
+  </div>
+  <button style="margin-top:12px" onclick="addAgent()">Add agent</button><div class="err" id="addErr"></div><div class="okmsg" id="addOk"></div>
+  <div class="scroll" style="margin-top:10px"><table id="users"></table></div>
+ </div>
+ <div class="card"><h2>Weekly team targets</h2><p class="muted">Used for the progress bars on the TV and agent screens.</p>
+  <div id="targets" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
+  <button style="margin-top:12px" onclick="saveTargets()">Save targets</button><span class="okmsg" id="tOk" style="margin-left:10px"></span></div>
+ <div class="card"><h2>Office TV screen</h2><p class="muted">Open this link on the office TV. It needs no login. Anyone with the link can see the TV screen, so regenerate the key if it gets shared.</p>
+  <input id="tvurl" readonly onclick="this.select()"><div class="row" style="margin-top:10px"><a class="btn" id="tvopen" target="_blank">Open TV view</a><button class="danger" onclick="regen()">Regenerate key</button></div></div>
+</div>
+<script src="/static/common.js"></script>
+<script>
+const M=['door_knocks','cold_calls','appr_booked','appr_done'];let D,curWeek='';
+const genPw=()=>{const a='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from(crypto.getRandomValues(new Uint8Array(10)),x=>a[x%a.length]).join('')};
+const delta=(a,b)=>{const d=a-b;return d>0?`<span class="up">▲${d}</span>`:d<0?`<span class="down">▼${-d}</span>`:''};
+async function load(){D=await api('/api/admin/summary'+(curWeek?'?week='+curWeek:''));curWeek=D.week;const L=D.labels;
+ $('#week').innerHTML=D.weeks.map(w=>`<option value="${w}" ${w===D.week?'selected':''}>${fmtWeek(w,new Date(Date.parse(w+'T00:00:00Z')+6*864e5).toISOString().slice(0,10))}</option>`).join('');
+ $('#csv').href='/api/admin/export.csv?week='+D.week;
+ $('#sub').textContent=`Week ${fmtWeek(D.week,D.week_end)} · Numbers in ${D.entered_count}/${D.agent_count} agents · Pipeline ${D.totals.pipeline_count} listings`;
+ $('#totals').innerHTML=M.map(m=>{const tg=D.targets[m]||0,v=D.totals[m],p=tg?Math.min(100,Math.round(v/tg*100)):0;return `<div class="stat"><span>${L[m]}</span><b>${v} ${delta(v,D.last_totals[m])}</b><span>Last week ${D.last_totals[m]}${tg?' · target '+tg:''}</span><div class="bar" style="margin-top:6px"><i style="width:${p}%"></i></div></div>`}).join('')+`<div class="stat"><span>Pipeline (30–90 days)</span><b>${D.totals.pipeline_count}</b><span>listings expected</span></div>`;
+ $('#missing').innerHTML=D.missing.length?D.missing.map(esc).join(', '):'Everyone has entered numbers ✓';
+ $('#tbl').innerHTML=`<tr><th>Agent</th><th>Today</th>${M.map(m=>`<th class="n">${L[m]}</th>`).join('')}<th class="n">Pipeline</th><th>Status / pipeline note</th></tr>`+
+  D.rows.map(r=>`<tr><td><a href="#" onclick="hist(${r.id},'${esc(r.name).replace(/'/g,'')}');return false">${esc(r.name)}</a></td><td>${r.working_today?'<span class="pill on">Working</span>':'<span class="pill off">—</span>'}</td>${M.map(m=>`<td class="n">${r[m]} ${delta(r[m],r.last[m])}</td>`).join('')}<td class="n">${r.pipeline_count}</td><td class="muted">${esc(r.status)}${r.status&&r.pipeline_note?'<br>':''}${esc(r.pipeline_note)}</td></tr>`).join('')+
+  `<tr style="font-weight:700"><td>Team</td><td></td>${M.map(m=>`<td class="n">${D.totals[m]}</td>`).join('')}<td class="n">${D.totals.pipeline_count}</td><td></td></tr>`;
+ $('#targets').innerHTML=M.map(m=>`<div><label>${L[m]}</label><input type="number" min="0" id="t_${m}" value="${D.targets[m]}"></div>`).join('');
+ const u=`${location.origin}/tv?key=${D.tv_key}`;$('#tvurl').value=u;$('#tvopen').href=u;
+ loadUsers()}
+async function loadUsers(){const us=await api('/api/admin/users');const me=us.find(x=>x.role==='admin'&&x.email.toLowerCase()==='gary.bal@harcourts.co.nz');if(me&&me.must_change)$('#pwb').style.display='block';
+ $('#users').innerHTML='<tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr>'+us.map(x=>`<tr><td>${esc(x.name)}${x.role==='admin'?' <span class="pill on">admin</span>':''}</td><td>${esc(x.email)}</td><td>${x.active?'Active':'Inactive'}${x.must_change?' · temp password':''}</td><td>${x.role==='admin'?'':`<div class="row"><button class="sec small" onclick="resetPw(${x.id})">Reset password</button><button class="sec small" onclick="setActive(${x.id},${x.active?0:1})">${x.active?'Deactivate':'Activate'}</button><button class="danger small" onclick="del(${x.id},'${esc(x.name).replace(/'/g,'')}')">Delete</button></div>`}</td></tr>`).join('')}
+async function addAgent(){$('#addErr').textContent='';$('#addOk').textContent='';try{const pw=nPw.value||genPw();await api('/api/admin/users',{body:{name:nName.value,email:nEmail.value,password:pw}});
+ $('#addOk').textContent=`Added. Give ${nName.value} this to sign in: ${location.origin}/login · ${nEmail.value} · temporary password ${pw}`;nName.value=nEmail.value=nPw.value='';load()}catch(e){$('#addErr').textContent=e.message}}
+async function resetPw(id){const pw=prompt('New temporary password (6+ characters):',genPw());if(!pw)return;try{await api(`/api/admin/users/${id}/reset`,{body:{password:pw}});alert('Password reset. New temporary password: '+pw);loadUsers()}catch(e){alert(e.message)}}
+async function setActive(id,a){await api(`/api/admin/users/${id}/active`,{body:{active:!!a}});load()}
+async function del(id,n){if(!confirm(`Delete ${n} and all their numbers? This can't be undone. (Deactivate keeps their history.)`))return;await api(`/api/admin/users/${id}`,{method:'DELETE'});load()}
+async function saveTargets(){const b={};M.forEach(m=>b[m]=$('#t_'+m).value);await api('/api/admin/targets',{body:b});$('#tOk').textContent='Saved';setTimeout(()=>$('#tOk').textContent='',2000);load()}
+async function regen(){if(!confirm('Make a new TV key? The old TV link will stop working.'))return;await api('/api/admin/tvkey',{body:{}});load()}
+async function hist(id,n){const h=await api(`/api/admin/agent/${id}/history`);$('#histTitle').textContent=n+' – weekly history';histCard.style.display='block';
+ $('#histTbl').innerHTML=`<tr><th>Week</th>${M.map(m=>`<th class="n">${D.labels[m]}</th>`).join('')}<th class="n">Pipeline</th><th>Note</th></tr>`+h.map(r=>`<tr><td>${esc(r.week_start)}</td>${M.map(m=>`<td class="n">${r[m]}</td>`).join('')}<td class="n">${r.pipeline_count}</td><td class="muted">${esc(r.pipeline_note)}</td></tr>`).join('');histCard.scrollIntoView({behavior:'smooth'})}
+$('#week').onchange=e=>{curWeek=e.target.value;load()};
+load();setInterval(()=>{if(document.visibilityState==='visible'&&curWeek===D?.weeks?.[0]&&!document.activeElement.matches('input,select,textarea'))load()},30000);
+</script></body></html>
