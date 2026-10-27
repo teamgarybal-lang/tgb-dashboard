@@ -45,9 +45,15 @@
    <label for="paddr">Property address</label>
    <input id="paddr" maxlength="200" required placeholder="e.g. 12 Great South Road, Papakura" autocomplete="off">
    <label for="pstage">Stage</label>
-   <select id="pstage"><option value="">Stage (optional)</option></select>
+   <select id="pstage" required>
+    <option>Appraised</option>
+    <option>Appraisal Booked</option>
+    <option>Hot</option>
+    <option selected>Warm</option>
+    <option>Cold</option>
+   </select>
    <label for="pnotes">Notes</label>
-   <textarea id="pnotes" rows="2" maxlength="300" placeholder="e.g. Pre-approved, vendor wants to list in November"></textarea>
+   <textarea id="pnotes" rows="2" maxlength="300" placeholder="e.g. Warm, vendor wants to list in November"></textarea>
    <div class="row" style="margin-top:10px"><button type="submit" id="pipeSave">Add to pipeline</button><button type="button" class="sec" id="pipeCancel" style="display:none">Cancel</button></div>
   </form>
   <div class="okmsg" id="pmsg"></div><div class="err" id="perr"></div>
@@ -83,8 +89,9 @@ async function load(){const d=await api('/api/me'+(currentDay?'?day='+encodeURIC
 $('#day').onchange=e=>{currentDay=e.target.value;load()};
 let editingPipe=null;
 function renderPipeline(d){const entries=d.entries||[];const stages=d.stages||[];const cur=$('#pstage').value;
- $('#pstage').innerHTML='<option value="">Stage (optional)</option>'+stages.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
- $('#pstage').value=stages.includes(cur)?cur:'';
+ const pick=stages.includes(cur)?cur:(stages.includes('Warm')?'Warm':(stages[0]||''));
+ $('#pstage').innerHTML=stages.map(s=>`<option value="${esc(s)}"${s===pick?' selected':''}>${esc(s)}</option>`).join('');
+ $('#pstage').value=pick;
  $('#pipeCount').textContent=entries.length===1?'1 address':entries.length+' addresses';
  $('#pipeList').innerHTML=entries.length?entries.map(e=>`<div class="metric"><div><div class="name">${esc(e.address)}</div><div class="sub">${esc(e.stage||'No stage')}${e.notes?' · '+esc(e.notes):''}</div></div><div class="row"><button type="button" class="sec small" data-edit="${e.id}">Edit</button><button type="button" class="danger small" data-del="${e.id}">Remove</button></div></div>`).join(''):'<p class="muted">No addresses yet.</p>';
  $('#pipeList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>startPipe(entries.find(e=>e.id===+b.dataset.edit)));

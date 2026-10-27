@@ -121,8 +121,28 @@ function migrateWeeklyMetrics() {
 }
 migrateWeeklyMetrics();
 
-// Stages match the old "expected in 30–90 days" note. Blank is allowed.
-const PIPELINE_STAGES = ['', 'Expected', 'Appraisal booked', 'Pre-approved', 'Under offer'];
+// Stage dropdown, in order. Blank is not a stage.
+const PIPELINE_STAGES = ['Appraised', 'Appraisal Booked', 'Hot', 'Warm', 'Cold'];
+// Old stored values, and close spellings, become one of those five.
+// Anything that is not an obvious equivalent, including a blank, becomes Warm.
+const STAGE_EQUIVALENTS = {
+  'appraisal booked': 'Appraisal Booked',
+  'appraisals booked': 'Appraisal Booked',
+  'appraised': 'Appraised',
+  'appraisal done': 'Appraised',
+  'appraisals done': 'Appraised',
+  'hot': 'Hot',
+  'warm': 'Warm',
+  'cold': 'Cold',
+};
+function pipelineStageKey(raw) {
+  return String(raw ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+function canonicalPipelineStage(raw) {
+  const s = String(raw ?? '').trim().replace(/\s+/g, ' ');
+  if (PIPELINE_STAGES.includes(s)) return s;
+  return STAGE_EQUIVALENTS[pipelineStageKey(s)] || null;
+}
 function cleanAddress(v) {
   const s = String(v ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').trim().replace(/\s+/g, ' ');
   return s ? s.slice(0, 200) : null;
@@ -131,8 +151,11 @@ function cleanNotes(v) {
   return String(v ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, 300);
 }
 function cleanStage(v) {
-  const s = String(v ?? '').trim();
+  const s = String(v ?? '').trim().replace(/\s+/g, ' ');
   return PIPELINE_STAGES.includes(s) ? s : null;
+}
+function migratedPipelineStage(raw) {
+  return canonicalPipelineStage(raw) || 'Warm';
 }
 
 // Turn the carried-forward weekly pipeline figure into address rows, once per user.
@@ -166,6 +189,30 @@ function migratePipelineEntries() {
   })(users);
 }
 migratePipelineEntries();
+
+// Rewrite stages saved before the five-stage list. Safe to run every start:
+// a value that is already current is left as it is.
+function migratePipelineStages() {
+  const rows = db.prepare('SELECT id, stage FROM pipeline_entries').all();
+  const update = db.prepare('UPDATE pipeline_entries SET stage=? WHERE id=?');
+  const counts = new Map();
+  db.transaction(list => {
+    for (const row of list) {
+      const next = migratedPipelineStage(row.stage);
+      if (next === row.stage) continue;
+      update.run(next, row.id);
+      const from = row.stage;
+      const bucket = counts.get(from) || { to: next, n: 0 };
+      bucket.n += 1;
+      counts.set(from, bucket);
+    }
+  })(rows);
+  if (counts.size) {
+    const detail = [...counts.entries()].map(([from, b]) => `${JSON.stringify(from)} -> ${b.to} (${b.n})`).join('; ');
+    console.log('Updated pipeline stages. ' + detail);
+  }
+}
+migratePipelineStages();
 
 // ---- NZ date helpers ----
 function nzDay(d = new Date()) { // YYYY-MM-DD in NZ
@@ -494,7 +541,7 @@ function ownPipeline(userId, id) {
 }
 app.get('/api/me/pipeline', requireUser, (req, res) => {
   const entries = db.prepare('SELECT id, address, notes, stage, created_at, updated_at FROM pipeline_entries WHERE user_id=? ORDER BY id DESC').all(req.user.id);
-  res.json({ entries, stages: PIPELINE_STAGES.filter(Boolean) });
+  res.json({ entries, stages: PIPELINE_STAGES });
 });
 app.get('/api/me/pipeline/:id', requireUser, (req, res) => {
   const id = pipelineId(req.params.id);
@@ -506,8 +553,8 @@ app.post('/api/me/pipeline', requireUser, (req, res) => {
   const b = req.body || {};
   const address = cleanAddress(b.address);
   if (!address) return res.status(400).json({ error: 'Property address is required' });
-  const stage = b.stage === undefined || b.stage === '' ? '' : cleanStage(b.stage);
-  if (stage === null) return res.status(400).json({ error: 'Unknown stage' });
+  const stage = cleanStage(b.stage);
+  if (!stage) return res.status(400).json({ error: 'Pick a stage' });
   const info = db.prepare(`INSERT INTO pipeline_entries(user_id,address,notes,stage,created_at,updated_at) VALUES(?,?,?,?,datetime('now'),datetime('now'))`)
     .run(req.user.id, address, cleanNotes(b.notes), stage);
   res.json({ ok: true, entry: ownPipeline(req.user.id, Number(info.lastInsertRowid)) });
@@ -520,7 +567,7 @@ app.post('/api/me/pipeline/:id', requireUser, (req, res) => {
   const address = b.address === undefined ? row.address : cleanAddress(b.address);
   if (!address) return res.status(400).json({ error: 'Property address is required' });
   const stage = b.stage === undefined ? row.stage : cleanStage(b.stage);
-  if (stage === null) return res.status(400).json({ error: 'Unknown stage' });
+  if (!stage) return res.status(400).json({ error: 'Pick a stage' });
   const notes = b.notes === undefined ? row.notes : cleanNotes(b.notes);
   db.prepare(`UPDATE pipeline_entries SET address=?, notes=?, stage=?, updated_at=datetime('now') WHERE id=? AND user_id=?`).run(address, notes, stage, id, req.user.id);
   const entry = ownPipeline(req.user.id, id);
