@@ -1,0 +1,134 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Listings board · Harcourts TGB Group</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B1F3A">
+<style>
+:root{--blue:#00ADEF;--navy:#071630;--mut:#9BB0CC;--gold:#F5C451}
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}
+body{background:radial-gradient(900px 480px at 8% -10%, rgba(0,173,239,.28), transparent 50%),linear-gradient(165deg,#071630,#0B1F3A 58%,#0A2748);color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.top{height:84px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;gap:16px}
+.brand{font-size:34px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.brand span{color:var(--blue);font-weight:300;margin-left:.35em}
+.topnav{display:flex;align-items:center;gap:18px}
+.topnav a{color:#8FD9F8;font-size:16px;font-weight:700;text-decoration:none}
+.meta{text-align:right}.meta b{display:block;font-size:30px;letter-spacing:-.03em;line-height:1}.meta span{color:var(--mut);font-size:16px}
+.main{height:calc(100% - 84px);display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:0 22px 18px}
+.panel{background:linear-gradient(180deg,rgba(16,40,76,.96),rgba(10,28,54,.96));border:1px solid rgba(255,255,255,.08);border-radius:22px;padding:16px 16px 12px;display:flex;flex-direction:column;min-height:0;box-shadow:0 16px 40px rgba(0,0,0,.22)}
+.right{display:grid;grid-template-rows:1.35fr .85fr;gap:14px;min-height:0}
+.sub{flex:1;min-height:0;display:flex;flex-direction:column;background:rgba(0,0,0,.16);border-radius:16px;padding:12px 12px 8px}
+h2{margin:0 0 10px;font-size:15px;letter-spacing:.16em;text-transform:uppercase;color:#8FD9F8;font-weight:800}
+.scroller{overflow:hidden;min-height:0;flex:1;padding-right:4px;scroll-behavior:smooth}
+.item{background:rgba(0,0,0,.28);border-radius:16px;padding:14px 16px 12px;margin-bottom:12px;border-left:5px solid var(--blue)}
+.item.sold{border-left-color:var(--gold)}.item.cond{border-left-color:#7C4DFF}
+.name{font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1.15}
+.addr{font-size:22px;font-weight:750;letter-spacing:-.02em;line-height:1.25;margin-top:4px}
+.agent{margin-top:6px;font-size:18px;color:var(--mut);font-weight:650}
+.method{margin-top:8px;font-size:20px;font-weight:800;color:#8FD9F8}
+.cv{margin-top:4px;font-size:18px;font-weight:700;color:#E7F6FD}
+.sale{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.badge{display:inline-block;font-size:20px;font-weight:800;letter-spacing:.08em;padding:4px 10px;border-radius:8px;line-height:1.1}
+.badge.sold{background:var(--gold);color:#3A2A04}
+.badge.cond{background:#7C4DFF;color:#fff}
+.price{font-size:30px;font-weight:800;letter-spacing:-.03em}
+.note{margin-top:6px;font-size:20px;font-weight:650;line-height:1.3;color:#F3E8FF}
+.empty{color:var(--mut);font-size:22px;font-style:italic;padding:8px 4px}
+#err{position:fixed;left:22px;bottom:10px;color:#FCA5A5;font-size:16px}
+</style></head><body>
+<div class="top">
+ <div class="brand">Harcourts <span>TGB Group</span></div>
+ <div class="topnav"><a href="/board/manage">Manage</a><div class="meta"><b id="clock"></b><span id="updated">Listings board</span></div></div>
+</div>
+<div class="main">
+ <section class="panel" aria-label="New listings">
+  <h2>New listings</h2>
+  <div class="scroller" id="newScroll" data-scroll><div id="newList"></div></div>
+ </section>
+ <div class="right">
+  <section class="sub" aria-label="Sold">
+   <h2>Sold</h2>
+   <div class="scroller" id="soldScroll" data-scroll><div id="soldList"></div></div>
+  </section>
+  <section class="sub" aria-label="Conditional">
+   <h2>Conditional</h2>
+   <div class="scroller" id="condScroll" data-scroll><div id="condList"></div></div>
+  </section>
+ </div>
+</div>
+<div id="err"></div>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const METHOD={auction:'Auction',negotiation:'Price by Negotiation',deadline:'Deadline Sale',price:'Price'};
+function place(it){const a=it.address||'',s=it.suburb||'';if(!s||a.toLowerCase().includes(s.toLowerCase()))return a;return a+', '+s}
+function methodLine(it){
+ if(it.method==='price')return 'Price'+(it.asking_price?' '+it.asking_price:'');
+ if(METHOD[it.method])return METHOD[it.method];
+ return it.asking_price||'';
+}
+function newCard(it){
+ const headline=it.name||place(it);
+ return `<article class="item"><div class="name">${esc(headline)}</div><div class="addr">${esc(place(it))}</div>${it.agent?`<div class="agent">${esc(it.agent)}</div>`:''}<div class="cv">CV ${esc(it.cv||'—')}</div>${methodLine(it)?`<div class="method">${esc(methodLine(it))}</div>`:''}</article>`;
+}
+function soldCard(it){
+ return `<article class="item sold"><div class="sale"><span class="badge sold">SOLD</span>${it.sale_price?`<span class="price">${esc(it.sale_price)}</span>`:''}</div><div class="addr">${esc(place(it))}</div>${it.agent?`<div class="agent">${esc(it.agent)}</div>`:''}</article>`;
+}
+function condCard(it){
+ return `<article class="item cond"><div class="badge cond">CONDITIONAL</div><div class="addr">${esc(place(it))}</div>${it.condition_text?`<div class="note">${esc(it.condition_text)}</div>`:''}${it.agent?`<div class="agent">${esc(it.agent)}</div>`:''}</article>`;
+}
+function fill(id, rows, render, empty){
+ document.getElementById(id).innerHTML=rows.length?rows.map(render).join(''):`<div class="empty">${empty}</div>`;
+}
+function tick(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-NZ',{timeZone:'Pacific/Auckland',hour:'numeric',minute:'2-digit'})}
+async function load(){
+ try{
+  const r=await fetch('/api/board',{cache:'no-store'});
+  if(r.status===401){location.replace('/login?next=/board');return}
+  if(r.status===403){location.replace('/board');return}
+  if(!r.ok)throw new Error('reload');
+  const d=await r.json();
+  fill('newList', d.new||[], newCard, 'No new listings');
+  fill('soldList', d.sold||[], soldCard, 'No recent sales');
+  fill('condList', d.conditional||[], condCard, 'No conditional properties');
+  const when=d.synced_at?new Date(d.synced_at):null;
+  document.getElementById('updated').textContent=when&&!Number.isNaN(when.getTime())
+    ? 'Updated '+when.toLocaleTimeString('en-NZ',{timeZone:'Pacific/Auckland',hour:'numeric',minute:'2-digit'})
+    : 'Listings board';
+  document.getElementById('err').textContent='';
+  pageIndex.newScroll=pageIndex.soldScroll=pageIndex.condScroll=0;
+  document.querySelectorAll('[data-scroll]').forEach(el=>{delete el._heights});
+  requestAnimationFrame(()=>showPages(false));
+ }catch(e){document.getElementById('err').textContent='Reconnecting…'}
+}
+const pageIndex={newScroll:0,soldScroll:0,condScroll:0};
+function showPages(advance){
+ document.querySelectorAll('[data-scroll]').forEach(el=>{
+  const items=[...el.querySelectorAll('.item')];
+  if(!items.length)return;
+  if(!el._heights){
+   items.forEach(item=>item.style.display='');
+   el._heights=items.map(item=>item.offsetHeight);
+  }
+  const avail=el.clientHeight||1;
+  const ranges=[];
+  let i=0;
+  while(i<items.length){
+   let used=0;
+   const start=i;
+   while(i<items.length && (i===start || used+el._heights[i]<=avail)){
+    used+=el._heights[i]+12;
+    i++;
+   }
+   ranges.push([start,i]);
+  }
+  let page=pageIndex[el.id]||0;
+  if(advance)page=(page+1)%ranges.length;
+  if(page>=ranges.length)page=0;
+  pageIndex[el.id]=page;
+  const [from,to]=ranges[page];
+  items.forEach((item,idx)=>{item.style.display=idx>=from&&idx<to?'':'none'});
+ });
+}
+setInterval(()=>showPages(true),20000);
+tick();setInterval(tick,10000);load();setInterval(load,6*60*1000);
+setTimeout(()=>location.reload(),6*3600e3);
+</script></body></html>
