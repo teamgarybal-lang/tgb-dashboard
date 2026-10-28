@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const listings = require('./listings');
 
 const PORT = process.env.PORT || 3100;
 const TZ = 'Pacific/Auckland';
@@ -54,6 +55,28 @@ CREATE TABLE IF NOT EXISTS pipeline_entries(
 CREATE TABLE IF NOT EXISTS pipeline_legacy_migration(
   user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS pipeline_entries_user ON pipeline_entries(user_id);
+`);
+db.exec(`
+CREATE TABLE IF NOT EXISTS board_listings (
+  id INTEGER PRIMARY KEY,
+  source_key TEXT UNIQUE,
+  origin TEXT NOT NULL DEFAULT 'manual',
+  status TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  suburb TEXT NOT NULL DEFAULT '',
+  agent TEXT NOT NULL DEFAULT '',
+  cv TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL DEFAULT '',
+  asking_price TEXT NOT NULL DEFAULT '',
+  sale_price TEXT NOT NULL DEFAULT '',
+  condition_text TEXT NOT NULL DEFAULT '',
+  hidden INTEGER NOT NULL DEFAULT 0,
+  admin_edited INTEGER NOT NULL DEFAULT 0,
+  source_rank INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidden);
 `);
 
 // Entry order on every screen. Score = appr_done*30 + appr_booked*20 + cold_calls + door_knocks + letter_drops.
@@ -782,6 +805,151 @@ app.get('/api/admin/pipeline.csv', requireAdmin, (req, res) => {
   sendCsv(res, 'tgb-pipeline.csv', ['name', 'email', 'address', 'notes', 'stage', 'created_at', 'updated_at'], rows);
 });
 
+// --- listings board (admins only; separate from the public /tv KPI board) ---
+const BOARD_SYNC_MS = listings.LISTING_SOURCE.syncMinutes * 60 * 1000;
+let boardSyncing = false;
+function boardRow(row) {
+  return {
+    id: row.id,
+    status: row.status,
+    name: row.name,
+    address: row.address,
+    suburb: row.suburb,
+    agent: row.agent,
+    cv: row.cv,
+    method: row.method,
+    asking_price: row.asking_price,
+    sale_price: row.sale_price,
+    condition_text: row.condition_text,
+    hidden: !!row.hidden,
+    origin: row.origin,
+    admin_edited: !!row.admin_edited,
+    source_key: row.source_key || '',
+    updated_at: row.updated_at,
+  };
+}
+function boardSyncInfo() {
+  let counts = {};
+  try { counts = JSON.parse(getSetting('board_sync_counts') || '{}'); } catch { counts = {}; }
+  return {
+    at: getSetting('board_sync_at') || '',
+    error: getSetting('board_sync_error') || '',
+    counts,
+    every_minutes: listings.LISTING_SOURCE.syncMinutes,
+    cv_from_website: false,
+    conditional_from_website: false,
+  };
+}
+function visibleBoard(status) {
+  return db.prepare(`SELECT * FROM board_listings WHERE hidden=0 AND status=?
+    ORDER BY datetime(created_at) DESC, source_rank ASC, id DESC`).all(status).map(boardRow);
+}
+async function fetchListingPage(url) {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'en-NZ,en;q=0.9',
+    },
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) throw new Error('Listing page could not be read');
+  return res.text();
+}
+async function syncBoard() {
+  if (boardSyncing) return { skipped: true };
+  boardSyncing = true;
+  try {
+    const buy = await listings.collectPages(listings.LISTING_SOURCE.buy, listings.LISTING_SOURCE.buyPages, fetchListingPage);
+    const sold = await listings.collectPages(listings.LISTING_SOURCE.sold, listings.LISTING_SOURCE.soldPages, fetchListingPage);
+    const items = listings.buildFeedItems(buy, sold);
+    if (!items.length) throw new Error('The listings pages returned no properties');
+    const existing = db.prepare('SELECT id, source_key, origin, admin_edited FROM board_listings').all();
+    const plan = listings.planFeedSync(existing, items);
+    const insert = db.prepare(`INSERT INTO board_listings(
+      source_key, origin, status, name, address, suburb, agent, cv, method, asking_price, sale_price,
+      condition_text, hidden, admin_edited, source_rank, created_at, updated_at)
+      VALUES(?,'feed',?,?,?,?,?,'',?,?,?,'',0,0,?,datetime('now'),datetime('now'))`);
+    const update = db.prepare(`UPDATE board_listings SET status=?, name=?, address=?, suburb=?, agent=?, method=?,
+      asking_price=?, sale_price=?, source_rank=?, hidden=0, updated_at=datetime('now')
+      WHERE id=? AND admin_edited=0`);
+    const retire = db.prepare('DELETE FROM board_listings WHERE id=? AND admin_edited=0 AND origin=\'feed\'');
+    db.transaction(() => {
+      for (const item of plan.upserts) {
+        if (item.id) update.run(item.status, item.name, item.address, item.suburb, item.agent, item.method, item.asking_price, item.sale_price, item.source_rank, item.id);
+        else insert.run(item.source_key, item.status, item.name, item.address, item.suburb, item.agent, item.method, item.asking_price, item.sale_price, item.source_rank);
+      }
+      for (const id of plan.retireIds) retire.run(id);
+    })();
+    const counts = {
+      new: items.filter(i => i.status === 'new').length,
+      sold: items.filter(i => i.status === 'sold').length,
+      conditional: items.filter(i => i.status === 'conditional').length,
+    };
+    setSetting('board_sync_at', new Date().toISOString());
+    setSetting('board_sync_error', '');
+    setSetting('board_sync_counts', JSON.stringify(counts));
+    return { ok: true, counts };
+  } catch (err) {
+    const message = String(err && err.message || 'Could not read the office listings pages').slice(0, 300);
+    setSetting('board_sync_error', message);
+    console.error('Listings sync failed:', message);
+    return { ok: false, error: message };
+  } finally {
+    boardSyncing = false;
+  }
+}
+app.get('/api/board', requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    brand: BRAND,
+    synced_at: getSetting('board_sync_at') || '',
+    refresh_minutes: listings.LISTING_SOURCE.pageRefreshMinutes,
+    new: visibleBoard('new'),
+    sold: visibleBoard('sold'),
+    conditional: visibleBoard('conditional'),
+  });
+});
+app.get('/api/board/manage', requireAdmin, (req, res) => {
+  const items = db.prepare(`SELECT * FROM board_listings
+    ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'sold' THEN 1 ELSE 2 END, datetime(created_at) DESC, id DESC`).all().map(boardRow);
+  res.json({ items, sync: boardSyncInfo() });
+});
+app.post('/api/board/items', requireAdmin, (req, res) => {
+  const parsed = listings.readBoardInput(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const v = parsed.value;
+  const r = db.prepare(`INSERT INTO board_listings(
+    origin, status, name, address, suburb, agent, cv, method, asking_price, sale_price, condition_text,
+    hidden, admin_edited, created_at, updated_at)
+    VALUES('manual',?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'),datetime('now'))`).run(
+    v.status, v.name, v.address, v.suburb, v.agent, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.hidden);
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+app.post('/api/board/items/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const row = db.prepare('SELECT id FROM board_listings WHERE id=?').get(id);
+  if (!row) return res.status(404).json({ error: 'Listing not found' });
+  const parsed = listings.readBoardInput(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const v = parsed.value;
+  db.prepare(`UPDATE board_listings SET status=?, name=?, address=?, suburb=?, agent=?, cv=?, method=?,
+    asking_price=?, sale_price=?, condition_text=?, hidden=?, admin_edited=1, updated_at=datetime('now') WHERE id=?`).run(
+    v.status, v.name, v.address, v.suburb, v.agent, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.hidden, id);
+  res.json({ ok: true });
+});
+app.post('/api/board/items/:id/delete', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const r = db.prepare('DELETE FROM board_listings WHERE id=?').run(id);
+  if (!r.changes) return res.status(404).json({ error: 'Listing not found' });
+  res.json({ ok: true });
+});
+app.post('/api/board/sync', requireAdmin, async (req, res) => {
+  const result = await syncBoard();
+  if (result && result.skipped) return res.status(429).json({ error: 'A refresh is already running' });
+  res.json({ ok: !result.error, error: result.error || '', counts: result.counts || null });
+});
+
 // --- pages ---
 const page = f => (req, res) => res.sendFile(path.join(__dirname, 'public', f));
 app.get('/manifest.webmanifest', (req, res) => {
@@ -798,6 +966,25 @@ app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));
 app.get('/admin', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); if (u.role !== 'admin') return res.redirect('/me'); page('admin.html')(req, res); });
+function boardDenied() {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Listings board · ${BRAND}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"></head>
+<body style="margin:0;min-height:100vh;background:#0B1F3A;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center">
+<div style="max-width:520px;padding:32px"><h1 style="font-weight:800">Harcourts <span style="color:#00ADEF;font-weight:300">TGB Group</span></h1>
+<p>This listings board is only for admins.</p><p><a href="/me" style="color:#8FD9F8">Back to your numbers</a></p></div></body></html>`;
+}
+function openBoard(file) {
+  return (req, res) => {
+    const u = auth(req);
+    if (!u) return res.redirect('/login?next=' + encodeURIComponent(req.path === '/board/manage' ? '/board/manage' : '/board'));
+    if (u.role !== 'admin') return res.status(403).type('html').send(boardDenied());
+    res.set('Cache-Control', 'no-store');
+    return page(file)(req, res);
+  };
+}
+app.get('/board/manage', openBoard('board-manage.html'));
+app.get('/board', openBoard('board.html'));
+app.get('/board/', openBoard('board.html'));
 function openTv(req, res) {
   if (req.query.key != null && String(req.query.key) !== '') {
     if (tvCodeOk(req.query.key)) { setTvCookie(req, res); return res.redirect('/tv'); }
@@ -816,4 +1003,8 @@ app.use('/static', express.static(path.join(__dirname, 'public', 'static'), { ma
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
 setInterval(() => db.prepare('DELETE FROM sessions WHERE expires<?').run(Date.now()), 36e5).unref();
+if (process.env.LISTINGS_SYNC !== '0') {
+  setTimeout(() => { syncBoard(); }, 5000).unref();
+  setInterval(() => { syncBoard(); }, BOARD_SYNC_MS).unref();
+}
 app.listen(PORT, () => console.log(`${BRAND} dashboard on :${PORT}`));
