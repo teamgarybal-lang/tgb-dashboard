@@ -20,16 +20,15 @@ function listedOnValue(value) {
   return s;
 }
 
-// Two agents share one line: "Aman Kaushal" and "Isaiah Stringer" become "Aman K & Isaiah S".
-function compactAgent(name) {
+// The TV shows the first name only. Full names stay in the database.
+function firstName(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return parts[0] || '';
-  return parts[0] + ' ' + parts[parts.length - 1][0].toUpperCase();
+  return parts[0] || '';
 }
 function formatAgents(agent, agent2) {
-  const a = String(agent || '').trim();
-  const b = String(agent2 || '').trim();
-  if (a && b) return compactAgent(a) + ' & ' + compactAgent(b);
+  const a = firstName(agent);
+  const b = firstName(agent2);
+  if (a && b) return a + ' & ' + b;
   return a || b;
 }
 
@@ -82,7 +81,7 @@ module.exports = {
   METHOD_LABELS,
   cleanText,
   listedOnValue,
-  compactAgent,
+  firstName,
   formatAgents,
   readBoardInput,
   shouldDropFeedRow,
