@@ -64,8 +64,8 @@ test('board input keeps a conditional price and only untouched website rows are 
   assert.equal(ok.value.listed_on, null);
   assert.equal(listings.readBoardInput({ status: 'new', address: '1 Lane', listed_on: '2020-01-15' }).value.listed_on, '2020-01-15');
   assert.equal(listings.readBoardInput({ status: 'new', address: '1 Lane', listed_on: '2020-13-40' }).error, 'Date must be a real calendar day');
-  assert.equal(listings.formatAgents('Aman Kaushal', 'Isaiah Stringer'), 'Aman K & Isaiah S');
-  assert.equal(listings.formatAgents('Claire Ocoma', ''), 'Claire Ocoma');
+  assert.equal(listings.formatAgents('Aman Kaushal', 'Isaiah Stringer'), 'Aman & Isaiah');
+  assert.equal(listings.formatAgents('Claire Ocoma', ''), 'Claire');
   assert.equal(listings.formatAgents('', ''), '');
   assert.equal(listings.shouldDropFeedRow({ origin: 'feed', admin_edited: 0 }), true);
   assert.equal(listings.shouldDropFeedRow({ origin: 'feed', admin_edited: 1 }), false);
@@ -197,7 +197,10 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.match(board.text, /No listings yet/);
     assert.match(board.text, /Harcourts/);
     assert.match(board.text, /TGB Group/);
-    assert.doesNotMatch(board.text, /NEW LISTINGS/);
+    assert.match(board.text, /NEW LISTINGS/);
+    assert.match(board.text, /SOLD LISTINGS/);
+    assert.match(board.text, /CONDITIONAL SALES/);
+    assert.match(board.text, /LISTING STOCK BOARD/);
     assert.equal(/manurewa/i.test(board.text), false);
     assert.match(board.text, /#00ADEF/);
     assert.doesNotMatch(board.text, /#F5C451/);

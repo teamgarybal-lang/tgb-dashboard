@@ -7,34 +7,48 @@
 :root{--blue:#00ADEF;--navy:#071630;--mut:#9BB0CC;--row:28px}
 *{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}
 body{background:radial-gradient(900px 480px at 8% -10%, rgba(0,173,239,.28), transparent 50%),linear-gradient(165deg,#071630,#0B1F3A 58%,#0A2748);color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-.top{height:68px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;gap:16px}
-.brand{font-size:30px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.top{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;gap:16px;position:relative}
+.brand{font-size:26px;font-weight:800;letter-spacing:-.03em;line-height:1;position:relative;z-index:1}
 .brand span{color:var(--blue);font-weight:300;margin-left:.35em}
-.topnav{display:flex;align-items:center;gap:16px}
+.board-title{position:absolute;left:50%;transform:translateX(-50%);margin:0;font-size:26px;font-weight:800;letter-spacing:.14em;color:#fff;text-shadow:0 0 18px rgba(0,173,239,.45);white-space:nowrap}
+.topnav{display:flex;align-items:center;gap:16px;position:relative;z-index:1}
 .topnav a{color:#8FD9F8;font-size:16px;font-weight:700;text-decoration:none}
-.meta{text-align:right}.meta b{display:block;font-size:26px;letter-spacing:-.03em;line-height:1}.meta span{color:#fff;font-size:16px;font-weight:700}
-.main{height:calc(100% - 68px);display:grid;grid-template-columns:1.15fr .85fr;gap:12px;padding:0 16px 12px}
-.panel{background:linear-gradient(180deg,rgba(16,40,76,.96),rgba(10,28,54,.96));border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:10px 12px 8px;display:flex;flex-direction:column;min-height:0;box-shadow:0 16px 40px rgba(0,0,0,.22)}
+.meta{text-align:right}.meta b{display:block;font-size:24px;letter-spacing:-.03em;line-height:1}.meta span{color:#fff;font-size:16px;font-weight:700}
+.main{height:calc(100% - 64px);display:grid;grid-template-columns:1.15fr .85fr;gap:12px;padding:0 16px 12px}
+.panel{background:linear-gradient(180deg,rgba(18,46,86,.98),rgba(8,24,48,.98));border:1px solid rgba(46,196,182,.28);border-radius:18px;padding:8px 12px 8px;display:flex;flex-direction:column;min-height:0;box-shadow:0 16px 36px rgba(0,0,0,.28),0 0 24px rgba(46,196,182,.08)}
 .right{display:grid;grid-template-rows:1fr 1fr;gap:10px;min-height:0}
-.sub{min-height:0;display:flex;flex-direction:column;background:rgba(0,0,0,.16);border-radius:14px;padding:8px 10px 6px}
-.sec-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;margin-bottom:2px}
-h2{margin:0;font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:#8FD9F8;font-weight:800}
-.pg{font-size:14px;font-weight:800;color:#8FD9F8;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.sub{min-height:0;display:flex;flex-direction:column;border-radius:16px;padding:6px 10px 4px;box-shadow:0 10px 24px rgba(0,0,0,.22)}
+.sub.sold{background:linear-gradient(180deg,rgba(10,40,68,.96),rgba(8,22,42,.96));border:1px solid rgba(0,173,239,.28)}
+.sub.cond{background:linear-gradient(180deg,rgba(48,32,12,.55),rgba(12,22,40,.96));border:1px solid rgba(227,155,18,.32)}
+.sec-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:26px;margin-bottom:2px;padding:2px 10px;border-radius:8px}
+.sec-head.new{background:linear-gradient(90deg,rgba(46,196,182,.42),rgba(46,196,182,.05));box-shadow:0 0 16px rgba(46,196,182,.16)}
+.sec-head.sold{background:linear-gradient(90deg,rgba(0,173,239,.45),rgba(0,173,239,.06));box-shadow:0 0 16px rgba(0,173,239,.18)}
+.sec-head.cond{background:linear-gradient(90deg,rgba(227,155,18,.48),rgba(227,155,18,.08));box-shadow:0 0 16px rgba(227,155,18,.16)}
+h2{margin:0;font-size:20px;line-height:22px;letter-spacing:.08em;font-weight:800;color:#fff}
+.sec-head.new h2{color:#B6FFF0}
+.sec-head.sold h2{color:#D7F4FF}
+.sec-head.cond h2{color:#FFE3A3}
+.pg{font-size:14px;font-weight:800;letter-spacing:.04em;font-variant-numeric:tabular-nums;color:#fff}
 table{width:100%;border-collapse:collapse;table-layout:fixed}
-th{text-align:left;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#8FD9F8;font-weight:800;padding:0 8px 4px;white-space:nowrap}
-tr.item td{font-size:18px;font-weight:650;height:var(--row);max-height:var(--row);line-height:var(--row);padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;border-top:1px solid rgba(255,255,255,.08)}
-table.listings th:nth-child(1),table.listings td:nth-child(1){width:40%}
-table.listings th:nth-child(2),table.listings td:nth-child(2){width:24%}
-table.listings th:nth-child(3),table.listings td:nth-child(3){width:14%}
-table.listings th:nth-child(4),table.listings td:nth-child(4){width:22%}
-table.sold th:nth-child(1),table.sold td:nth-child(1){width:50%}
-table.sold th:nth-child(2),table.sold td:nth-child(2){width:18%}
-table.sold th:nth-child(3),table.sold td:nth-child(3){width:32%}
+th{text-align:left;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8FD9F8;font-weight:800;padding:0 8px 2px;white-space:nowrap}
+tr.item td{font-size:18px;font-weight:650;height:var(--row);max-height:var(--row);line-height:var(--row);padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;border-top:1px solid rgba(255,255,255,.06)}
+tr.item:nth-child(even) td{background:rgba(255,255,255,.045)}
+table.listings th:nth-child(1),table.listings td:nth-child(1){width:42%}
+table.listings th:nth-child(2),table.listings td:nth-child(2){width:18%}
+table.listings th:nth-child(3),table.listings td:nth-child(3){width:16%}
+table.listings th:nth-child(4),table.listings td:nth-child(4){width:24%}
+table.listings tr.item td:first-child{box-shadow:inset 3px 0 0 #2EC4B6}
+table.sold th:nth-child(1),table.sold td:nth-child(1){width:52%}
+table.sold th:nth-child(2),table.sold td:nth-child(2){width:20%}
+table.sold th:nth-child(3),table.sold td:nth-child(3){width:28%}
 table.sold tr.item td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
-table.cond th:nth-child(1),table.cond td:nth-child(1){width:40%}
-table.cond th:nth-child(2),table.cond td:nth-child(2){width:24%}
-table.cond th:nth-child(3),table.cond td:nth-child(3){width:20%}
-table.cond th:nth-child(4),table.cond td:nth-child(4){width:16%}
+table.sold td.money{color:#7AD7FF;font-weight:800}
+table.cond th:nth-child(1),table.cond td:nth-child(1){width:26%}
+table.cond th:nth-child(2),table.cond td:nth-child(2){width:42%}
+table.cond th:nth-child(3),table.cond td:nth-child(3){width:18%}
+table.cond th:nth-child(4),table.cond td:nth-child(4){width:14%}
+table.cond tr.item td:first-child{box-shadow:inset 3px 0 0 #E39B12}
+table.cond td.money{color:#FFD27A;font-weight:800}
 td.money,th.money{white-space:nowrap;text-overflow:clip}
 .line{display:flex;align-items:center;gap:8px;min-width:0;height:var(--row)}
 .clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -45,22 +59,23 @@ td.money,th.money{white-space:nowrap;text-overflow:clip}
 </style></head><body>
 <div class="top">
  <div class="brand">Harcourts <span>TGB Group</span></div>
+ <h1 class="board-title">LISTING STOCK BOARD</h1>
  <div class="topnav"><a href="/board/add">Add</a><a href="/board/manage">Manage</a><div class="meta"><b id="clock"></b><span id="monthLabel">Listings board</span></div></div>
 </div>
 <div class="main">
  <section class="panel" aria-label="Listings">
-  <div class="sec-head"><span></span><span class="pg" id="newPage"></span></div>
+  <div class="sec-head new"><h2 id="newHead">NEW LISTINGS</h2><span class="pg" id="newPage"></span></div>
   <table class="head listings"><thead><tr><th>Address</th><th>Agent</th><th>CV</th><th>Method of sale</th></tr></thead></table>
   <div class="scroller" id="newScroll" data-scroll><table class="listings"><tbody id="newList"></tbody></table></div>
  </section>
  <div class="right">
-  <section class="sub" id="soldSection" aria-label="Sold">
-   <div class="sec-head"><h2>Sold</h2><span class="pg" id="soldPage"></span></div>
+  <section class="sub sold" id="soldSection" aria-label="Sold">
+   <div class="sec-head sold"><h2 id="soldHead">SOLD LISTINGS</h2><span class="pg" id="soldPage"></span></div>
    <table class="head sold"><thead><tr><th>Address</th><th class="money">Price</th><th>Agent</th></tr></thead></table>
    <div class="scroller" id="soldScroll" data-scroll><table class="sold"><tbody id="soldList"></tbody></table></div>
   </section>
-  <section class="sub" id="condSection" aria-label="Conditional">
-   <div class="sec-head"><h2>Conditional</h2><span class="pg" id="condPage"></span></div>
+  <section class="sub cond" id="condSection" aria-label="Conditional">
+   <div class="sec-head cond"><h2 id="condHead">CONDITIONAL SALES</h2><span class="pg" id="condPage"></span></div>
    <table class="head cond"><thead><tr><th>Address</th><th>Conditions</th><th>Agent</th><th class="money">Price</th></tr></thead></table>
    <div class="scroller" id="condScroll" data-scroll><table class="cond"><tbody id="condList"></tbody></table></div>
   </section>
@@ -78,14 +93,13 @@ function methodLine(it){
  return it.asking_price||'—';
 }
 function dash(v){return v?esc(v):'—'}
-function compactAgent(name){
+function firstName(name){
  const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
- if(parts.length<2)return parts[0]||'';
- return parts[0]+' '+parts[parts.length-1][0].toUpperCase();
+ return parts[0]||'';
 }
 function agents(it){
- const a=String(it.agent||'').trim(), b=String(it.agent2||'').trim();
- if(a&&b)return compactAgent(a)+' & '+compactAgent(b);
+ const a=firstName(it.agent), b=firstName(it.agent2);
+ if(a&&b)return a+' & '+b;
  return a||b;
 }
 function newRow(it){
@@ -129,6 +143,9 @@ async function load(){
   emptyNote('soldScroll', sold);
   emptyNote('condScroll', cond);
   document.getElementById('monthLabel').textContent=d.month_label||'Listings board';
+  document.getElementById('newHead').textContent=`NEW LISTINGS · ${fresh.length}`;
+  document.getElementById('soldHead').textContent=`SOLD LISTINGS · ${sold.length}`;
+  document.getElementById('condHead').textContent=`CONDITIONAL SALES · ${cond.length}`;
   applySplit(sold.length, cond.length);
   document.getElementById('err').textContent='';
   pageIndex.newScroll=pageIndex.soldScroll=pageIndex.condScroll=0;
