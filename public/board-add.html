@@ -27,6 +27,9 @@
    </select>
    <label for="address">Address</label>
    <input id="address" maxlength="200" required placeholder="12 Example Street, Papatoetoe" autocomplete="off">
+   <label for="listedOn">Date (optional)</label>
+   <input id="listedOn" type="date">
+   <p class="muted" style="margin:4px 0 0">Leave blank to count it in the month you add it. The TV shows one month at a time.</p>
    <div data-for="new sold conditional">
     <label for="agentPick">Agent</label>
     <select id="agentPick"><option value="">Choose an agent</option><option value="__other">Type a name</option></select>
@@ -104,14 +107,14 @@ document.getElementById('form').onsubmit=async ev=>{
  document.getElementById('formErr').textContent='';
  document.getElementById('formOk').textContent='';
  const s=statusEl.value;
- const body={status:s,address:address.value,agent:pickedName(agentPick,agentOther),agent2:pickedName(agent2Pick,agent2Other),cv:'',method:'',asking_price:'',sale_price:'',condition_text:'',cond_price:''};
+ const body={status:s,address:address.value,listed_on:listedOn.value,agent:pickedName(agentPick,agentOther),agent2:pickedName(agent2Pick,agent2Other),cv:'',method:'',asking_price:'',sale_price:'',condition_text:'',cond_price:''};
  if(s==='new'){body.cv=cv.value;body.method=methodEl.value;if(methodEl.value==='price')body.asking_price=asking.value}
  if(s==='sold')body.sale_price=sale.value;
  if(s==='conditional'){body.condition_text=condition.value;body.cond_price=condPrice.value}
  try{
   await api('/api/board/items',{body});
   document.getElementById('formOk').textContent='Saved. Add the next listing below.';
-  address.value=cv.value=asking.value=sale.value=condition.value=condPrice.value=agentOther.value=agent2Other.value='';
+  address.value=listedOn.value=cv.value=asking.value=sale.value=condition.value=condPrice.value=agentOther.value=agent2Other.value='';
   agentPick.value='';
   agent2Pick.value='';
   agentOther.style.display='none';

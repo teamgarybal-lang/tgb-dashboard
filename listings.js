@@ -10,6 +10,29 @@ const METHOD_LABELS = {
   price: 'Price',
 };
 
+function listedOnValue(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const s = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return false;
+  return s;
+}
+
+// Two agents share one line: "Aman Kaushal" and "Isaiah Stringer" become "Aman K & Isaiah S".
+function compactAgent(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return parts[0] || '';
+  return parts[0] + ' ' + parts[parts.length - 1][0].toUpperCase();
+}
+function formatAgents(agent, agent2) {
+  const a = String(agent || '').trim();
+  const b = String(agent2 || '').trim();
+  if (a && b) return compactAgent(a) + ' & ' + compactAgent(b);
+  return a || b;
+}
+
 function cleanText(value, max) {
   const s = String(value ?? '')
     .replace(/[\u0000-\u001F\u007F]/g, ' ')
@@ -26,6 +49,8 @@ function readBoardInput(body) {
   if (method && !BOARD_METHODS.includes(method)) return { error: 'Method of sale is not valid' };
   const address = cleanText(b.address, 200);
   if (!address) return { error: 'Address is required' };
+  const listedOn = listedOnValue(b.listed_on);
+  if (listedOn === false) return { error: 'Date must be a real calendar day' };
   return {
     value: {
       status,
@@ -40,6 +65,7 @@ function readBoardInput(body) {
       sale_price: cleanText(b.sale_price, 80),
       condition_text: cleanText(b.condition_text, 240),
       cond_price: cleanText(b.cond_price, 80),
+      listed_on: listedOn,
       hidden: b.hidden ? 1 : 0,
     },
   };
@@ -55,6 +81,9 @@ module.exports = {
   BOARD_METHODS,
   METHOD_LABELS,
   cleanText,
+  listedOnValue,
+  compactAgent,
+  formatAgents,
   readBoardInput,
   shouldDropFeedRow,
 };
