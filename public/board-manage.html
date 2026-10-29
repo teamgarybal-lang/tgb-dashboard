@@ -7,25 +7,27 @@
 <body>
 <header class="top"><img src="/static/logo.png" alt="Harcourts TGB Group"><div class="who"><b>Listings</b> · <a href="/admin">Team numbers</a> · <a href="/board" target="_blank">Open TV board</a> · <a href="#" onclick="logout();return false">Sign out</a></div></header>
 <div class="wrap wide">
- <div class="hint">New listings and recent sales are read from the office public website about every 8 minutes. That website does not publish council valuations or under-contract properties, and a sale price is filled in only when the website shows one. Conditional entries are added here. After you edit or hide a website listing, later refreshes leave your version in place.</div>
+ <div class="card"><div class="row" style="justify-content:space-between;align-items:center">
+  <div><h2 style="margin:0">Listings on the TV</h2><p class="muted" style="margin:6px 0 0">Add, change or remove a listing. The short form is the easiest way to add one.</p></div>
+  <a class="btn" href="/board/add">Add a listing</a>
+ </div></div>
  <div class="card">
   <div class="row" style="justify-content:space-between">
-   <h2 id="formTitle" style="margin:0">Add a listing</h2>
+   <h2 id="formTitle" style="margin:0">Add or change a listing</h2>
    <button class="sec" type="button" id="cancelEdit" style="display:none" onclick="resetForm()">Cancel edit</button>
   </div>
   <form id="form">
    <input type="hidden" id="id">
    <div class="grid2">
-    <div><label for="name">Name</label><input id="name" maxlength="140" placeholder="Listing headline"></div>
     <div><label for="status">Status</label><select id="status">
      <option value="new">New listing</option>
      <option value="conditional">Conditional</option>
      <option value="sold">Sold</option>
     </select></div>
-    <div><label for="address">Property address</label><input id="address" maxlength="200" required placeholder="12 Example Street"></div>
+    <div><label for="address">Address</label><input id="address" maxlength="200" required placeholder="12 Example Street"></div>
     <div><label for="suburb">Suburb</label><input id="suburb" maxlength="80"></div>
-    <div><label for="agent">Agent name</label><input id="agent" maxlength="80"></div>
-    <div><label for="cv">CV (council valuation)</label><input id="cv" maxlength="80" placeholder="Leave blank if unknown"></div>
+    <div><label for="agent">Agent</label><input id="agent" maxlength="80"></div>
+    <div><label for="cv">CV</label><input id="cv" maxlength="80" placeholder="Leave blank if unknown"></div>
     <div><label for="method">Method of sale</label><select id="method">
      <option value="">Not set</option>
      <option value="auction">Auction</option>
@@ -34,14 +36,14 @@
      <option value="price">Price</option>
     </select></div>
     <div><label for="asking">Asking price</label><input id="asking" maxlength="80" placeholder="Used when method is Price"></div>
-    <div><label for="sale">Sale price</label><input id="sale" maxlength="80" placeholder="Leave blank if unknown"></div>
-    <div><label for="condition">Condition</label><input id="condition" maxlength="240" placeholder="e.g. subject to finance, due 5 Nov"></div>
+    <div><label for="sale">Sale price</label><input id="sale" maxlength="80" placeholder="Shown next to SOLD"></div>
+    <div><label for="condition">Conditions</label><input id="condition" maxlength="240" placeholder="e.g. subject to finance, due 5 Nov"></div>
+    <div><label for="condPrice">Price</label><input id="condPrice" maxlength="80" placeholder="Shown on a conditional listing"></div>
    </div>
    <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input id="hidden" type="checkbox" style="width:auto;min-height:0"> Hide on the TV board</label>
-   <div class="row" style="margin-top:14px"><button type="submit" id="saveBtn">Add listing</button><button class="sec" type="button" id="refreshBtn">Refresh from the website</button></div>
+   <div class="row" style="margin-top:14px"><button type="submit" id="saveBtn">Save</button></div>
    <div class="err" id="formErr"></div><div class="okmsg" id="formOk"></div>
   </form>
-  <p class="muted" id="syncNote"></p>
  </div>
  <div id="groups"></div>
 </div>
@@ -52,37 +54,27 @@ const METHOD={auction:'Auction',negotiation:'Price by Negotiation',deadline:'Dea
 const STATUS={new:'New',conditional:'Conditional',sold:'Sold'};
 function val(id){return document.getElementById(id).value}
 function setv(id,v){document.getElementById(id).value=v??''}
-function payload(){return {name:val('name'),address:val('address'),suburb:val('suburb'),agent:val('agent'),cv:val('cv'),method:val('method'),asking_price:val('asking'),sale_price:val('sale'),condition_text:val('condition'),status:val('status'),hidden:document.getElementById('hidden').checked}}
-function resetForm(){document.getElementById('form').reset();setv('id','');setv('status','new');document.getElementById('formTitle').textContent='Add a listing';document.getElementById('saveBtn').textContent='Add listing';document.getElementById('cancelEdit').style.display='none';document.getElementById('formErr').textContent='';}
-function editItem(id){const it=items.find(x=>x.id===id);if(!it)return;setv('id',it.id);setv('name',it.name);setv('address',it.address);setv('suburb',it.suburb);setv('agent',it.agent);setv('cv',it.cv);setv('method',it.method||'');setv('asking',it.asking_price);setv('sale',it.sale_price);setv('condition',it.condition_text);setv('status',it.status);document.getElementById('hidden').checked=!!it.hidden;document.getElementById('formTitle').textContent='Edit listing';document.getElementById('saveBtn').textContent='Save changes';document.getElementById('cancelEdit').style.display='';document.getElementById('formErr').textContent='';window.scrollTo({top:0,behavior:'smooth'})}
+function payload(){return {address:val('address'),suburb:val('suburb'),agent:val('agent'),cv:val('cv'),method:val('method'),asking_price:val('asking'),sale_price:val('sale'),condition_text:val('condition'),cond_price:val('condPrice'),status:val('status'),hidden:document.getElementById('hidden').checked}}
+function resetForm(){document.getElementById('form').reset();setv('id','');setv('status','new');document.getElementById('formTitle').textContent='Add or change a listing';document.getElementById('saveBtn').textContent='Save';document.getElementById('cancelEdit').style.display='none';document.getElementById('formErr').textContent=''}
+function editItem(id){const it=items.find(x=>x.id===id);if(!it)return;setv('id',it.id);setv('address',it.address);setv('suburb',it.suburb);setv('agent',it.agent);setv('cv',it.cv);setv('method',it.method||'');setv('asking',it.asking_price);setv('sale',it.sale_price);setv('condition',it.condition_text);setv('condPrice',it.cond_price);setv('status',it.status);document.getElementById('hidden').checked=!!it.hidden;document.getElementById('formTitle').textContent='Edit listing';document.getElementById('saveBtn').textContent='Save changes';document.getElementById('cancelEdit').style.display='';document.getElementById('formErr').textContent='';window.scrollTo({top:0,behavior:'smooth'})}
 function place(it){const a=it.address||'',s=it.suburb||'';if(!s||a.toLowerCase().includes(s.toLowerCase()))return a;return a+', '+s}
 function line(it){
  const bits=[];
  if(it.agent)bits.push(esc(it.agent));
- if(it.status==='new'){const m=it.method==='price'?(it.asking_price?`Price ${esc(it.asking_price)}`:'Price'):esc(METHOD[it.method]||it.asking_price||'');if(m)bits.push(m);bits.push('CV '+(it.cv?esc(it.cv):'—'))}
+ if(it.status==='new'){const m=it.method==='price'?(it.asking_price?`Price ${esc(it.asking_price)}`:'Price'):esc(METHOD[it.method]||'');if(m)bits.push(m);bits.push('CV '+(it.cv?esc(it.cv):'—'))}
  if(it.status==='sold')bits.push(it.sale_price?`Sale price ${esc(it.sale_price)}`:'Sale price not shown');
- if(it.status==='conditional'&&it.condition_text)bits.push(esc(it.condition_text));
+ if(it.status==='conditional'){if(it.condition_text)bits.push(esc(it.condition_text));bits.push(it.cond_price?`Price ${esc(it.cond_price)}`:'Price —')}
  return bits.join(' · ');
 }
 function render(){
  const order=['new','sold','conditional'];
  document.getElementById('groups').innerHTML=order.map(status=>{
   const rows=items.filter(it=>it.status===status);
-  const body=rows.length?rows.map(it=>`<article class="card" style="margin-bottom:10px"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(it.name||place(it))}</h3><span class="pill ${it.hidden?'off':'on'}">${it.hidden?'Hidden':'On the TV'}</span></div><p style="margin:8px 0 4px;font-weight:700">${esc(place(it))}</p><p class="muted" style="margin:0">${line(it)}</p><p class="muted" style="margin:6px 0 0">${it.origin==='feed'?'From the website':'Added by hand'}${it.admin_edited&&it.origin==='feed'?' · your edits are kept':''}</p><div class="row" style="margin-top:10px"><button type="button" class="sec small" onclick="editItem(${it.id})">Edit</button><button type="button" class="sec small" onclick="toggleHide(${it.id})">${it.hidden?'Show on TV':'Hide'}</button><button type="button" class="danger small" onclick="removeItem(${it.id})">Delete</button></div></article>`).join(''):'<p class="muted">Nothing in this group.</p>';
+  const body=rows.length?rows.map(it=>`<article class="card" style="margin-bottom:10px"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(place(it))}</h3><span class="pill ${it.hidden?'off':'on'}">${it.hidden?'Hidden':'On the TV'}</span></div><p class="muted" style="margin:8px 0 0">${line(it)}</p><div class="row" style="margin-top:10px"><button type="button" class="sec small" onclick="editItem(${it.id})">Edit</button><button type="button" class="sec small" onclick="toggleHide(${it.id})">${it.hidden?'Show on TV':'Hide'}</button><button type="button" class="danger small" onclick="removeItem(${it.id})">Delete</button></div></article>`).join(''):'<p class="muted">Nothing in this group.</p>';
   return `<h2>${STATUS[status]} <span class="muted">${rows.length}</span></h2>${body}`;
  }).join('');
 }
-async function load(){
- const d=await api('/api/board/manage');
- items=d.items||[];
- render();
- const sync=d.sync||{};
- const bits=[];
- if(sync.at)bits.push('Last website refresh '+new Date(sync.at).toLocaleString('en-NZ',{timeZone:'Pacific/Auckland'}));
- else bits.push('No website refresh yet');
- if(sync.error)bits.push('Last error: '+sync.error);
- document.getElementById('syncNote').textContent=bits.join(' · ');
-}
+async function load(){const d=await api('/api/board/manage');items=d.items||[];render()}
 document.getElementById('form').onsubmit=async ev=>{
  ev.preventDefault();
  document.getElementById('formErr').textContent='';document.getElementById('formOk').textContent='';
@@ -97,17 +89,13 @@ document.getElementById('form').onsubmit=async ev=>{
 };
 async function toggleHide(id){
  const it=items.find(x=>x.id===id);if(!it)return;
- try{await api('/api/board/items/'+id,{body:{...it,asking_price:it.asking_price,hidden:!it.hidden}});await load()}catch(e){alert(e.message)}
+ try{await api('/api/board/items/'+id,{body:{...it,hidden:!it.hidden}});await load()}catch(e){alert(e.message)}
 }
 async function removeItem(id){
  const it=items.find(x=>x.id===id);if(!it)return;
- const label=it.name||place(it)||'this listing';
+ const label=place(it)||'this listing';
  if(!confirm('Delete '+label+'? This cannot be undone.'))return;
  try{await api('/api/board/items/'+id+'/delete',{body:{}});await load()}catch(e){alert(e.message)}
 }
-document.getElementById('refreshBtn').onclick=async()=>{
- document.getElementById('formErr').textContent='';document.getElementById('formOk').textContent='Refreshing…';
- try{const d=await api('/api/board/sync',{body:{}});document.getElementById('formOk').textContent=d.error?('Refresh failed: '+d.error):'Website listings refreshed';await load()}catch(e){document.getElementById('formOk').textContent='';document.getElementById('formErr').textContent=e.message}
-};
 load();
 </script></body></html>

@@ -1,0 +1,114 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Add a listing · Harcourts TGB Group</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B1F3A">
+<link rel="stylesheet" href="/static/app.css">
+<style>
+.add-wrap{max-width:760px}
+.add-wrap h2{font-size:32px}
+.add-wrap label{font-size:18px;margin-top:16px}
+.add-wrap input,.add-wrap select{font-size:22px;min-height:64px;padding:14px 16px}
+.add-wrap button{font-size:22px;min-height:64px;width:100%;margin-top:22px}
+.add-wrap .okmsg{font-size:20px;font-weight:700}
+</style></head>
+<body>
+<header class="top"><img src="/static/logo.png" alt="Harcourts TGB Group"><div class="who"><b>Add a listing</b> · <a href="/board/manage">Manage</a> · <a href="/board" target="_blank">TV board</a> · <a href="#" onclick="logout();return false">Sign out</a></div></header>
+<div class="wrap add-wrap">
+ <div class="card">
+  <h2 style="margin-bottom:4px">Add a listing</h2>
+  <p class="muted" style="margin-top:0">One listing at a time. It shows on the office TV as soon as you save.</p>
+  <form id="form">
+   <label for="status">What is this?</label>
+   <select id="status">
+    <option value="new">New listing</option>
+    <option value="sold">Sold</option>
+    <option value="conditional">Conditional</option>
+   </select>
+   <label for="address">Address</label>
+   <input id="address" maxlength="200" required placeholder="12 Example Street, Papatoetoe" autocomplete="off">
+   <div data-for="new sold conditional">
+    <label for="agentPick">Agent</label>
+    <select id="agentPick"><option value="">Choose an agent</option><option value="__other">Type a name</option></select>
+    <input id="agentOther" maxlength="80" placeholder="Agent name" style="display:none;margin-top:10px" autocomplete="off">
+   </div>
+   <div data-for="new">
+    <label for="cv">CV</label>
+    <input id="cv" maxlength="80" placeholder="Council valuation, if you have it" autocomplete="off">
+    <label for="method">Method of sale</label>
+    <select id="method">
+     <option value="auction">Auction</option>
+     <option value="negotiation">Price by Negotiation</option>
+     <option value="deadline">Deadline Sale</option>
+     <option value="price">Price</option>
+    </select>
+   </div>
+   <div id="askingWrap" data-for="new">
+    <label for="asking">Price amount</label>
+    <input id="asking" maxlength="80" placeholder="$749,000" autocomplete="off">
+   </div>
+   <div data-for="sold">
+    <label for="sale">Sale price</label>
+    <input id="sale" maxlength="80" placeholder="$880,000" autocomplete="off">
+   </div>
+   <div data-for="conditional">
+    <label for="condition">Conditions</label>
+    <input id="condition" maxlength="240" placeholder="subject to finance, due 5 Nov" autocomplete="off">
+    <label for="condPrice">Price</label>
+    <input id="condPrice" maxlength="80" placeholder="$910,000" autocomplete="off">
+   </div>
+   <button type="submit" id="saveBtn">Save</button>
+   <div class="okmsg" id="formOk"></div>
+   <div class="err" id="formErr"></div>
+  </form>
+ </div>
+</div>
+<script src="/static/common.js"></script>
+<script>
+const statusEl=document.getElementById('status');
+const methodEl=document.getElementById('method');
+const agentPick=document.getElementById('agentPick');
+const agentOther=document.getElementById('agentOther');
+function showFields(){
+ const s=statusEl.value;
+ document.querySelectorAll('[data-for]').forEach(el=>{
+  el.style.display=el.getAttribute('data-for').split(' ').includes(s)?'':'none';
+ });
+ document.getElementById('askingWrap').style.display=s==='new'&&methodEl.value==='price'?'':'none';
+}
+function agentName(){
+ if(agentPick.value==='__other')return agentOther.value.trim();
+ return agentPick.value.trim();
+}
+agentPick.onchange=()=>{agentOther.style.display=agentPick.value==='__other'?'':'none';if(agentPick.value==='__other')agentOther.focus()};
+statusEl.onchange=showFields;
+methodEl.onchange=showFields;
+async function loadAgents(){
+ const d=await api('/api/board/agents');
+ const names=(d.agents||[]).map(a=>a.name).filter(Boolean);
+ const opts=['<option value="">Choose an agent</option>'].concat(names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`),['<option value="__other">Type a name</option>']);
+ agentPick.innerHTML=opts.join('');
+}
+document.getElementById('form').onsubmit=async ev=>{
+ ev.preventDefault();
+ document.getElementById('formErr').textContent='';
+ document.getElementById('formOk').textContent='';
+ const s=statusEl.value;
+ const body={status:s,address:address.value,agent:agentName(),cv:'',method:'',asking_price:'',sale_price:'',condition_text:'',cond_price:''};
+ if(s==='new'){body.cv=cv.value;body.method=methodEl.value;if(methodEl.value==='price')body.asking_price=asking.value}
+ if(s==='sold')body.sale_price=sale.value;
+ if(s==='conditional'){body.condition_text=condition.value;body.cond_price=condPrice.value}
+ try{
+  await api('/api/board/items',{body});
+  document.getElementById('formOk').textContent='Saved. Add the next listing below.';
+  address.value=cv.value=asking.value=sale.value=condition.value=condPrice.value=agentOther.value='';
+  agentPick.value='';
+  agentOther.style.display='none';
+  if(s==='new')methodEl.value='auction';
+  showFields();
+  address.focus();
+ }catch(e){document.getElementById('formErr').textContent=e.message}
+};
+showFields();
+loadAgents();
+</script></body></html>

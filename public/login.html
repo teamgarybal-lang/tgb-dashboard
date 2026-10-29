@@ -30,6 +30,6 @@ document.getElementById('f').onsubmit=async ev=>{ev.preventDefault();const err=d
  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e.value,password:p.value})});
  const j=await r.json();if(!r.ok){err.textContent=j.error||'Sign in failed';return}
  const next=new URLSearchParams(location.search).get('next');
- location.href=j.role==='admin'&&(next==='/board'||next==='/board/manage')?next:(j.role==='admin'?'/admin':'/me')};
+ location.href=j.role==='admin'&&(next==='/board'||next==='/board/manage'||next==='/board/add')?next:(j.role==='admin'?'/admin':'/me')};
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script></body></html>
