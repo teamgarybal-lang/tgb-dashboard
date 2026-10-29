@@ -31,6 +31,9 @@
     <label for="agentPick">Agent</label>
     <select id="agentPick"><option value="">Choose an agent</option><option value="__other">Type a name</option></select>
     <input id="agentOther" maxlength="80" placeholder="Agent name" style="display:none;margin-top:10px" autocomplete="off">
+    <label for="agent2Pick">Second agent (optional)</label>
+    <select id="agent2Pick"><option value="">None</option><option value="__other">Type a name</option></select>
+    <input id="agent2Other" maxlength="80" placeholder="Second agent name" style="display:none;margin-top:10px" autocomplete="off">
    </div>
    <div data-for="new">
     <label for="cv">CV</label>
@@ -69,6 +72,8 @@ const statusEl=document.getElementById('status');
 const methodEl=document.getElementById('method');
 const agentPick=document.getElementById('agentPick');
 const agentOther=document.getElementById('agentOther');
+const agent2Pick=document.getElementById('agent2Pick');
+const agent2Other=document.getElementById('agent2Other');
 function showFields(){
  const s=statusEl.value;
  document.querySelectorAll('[data-for]').forEach(el=>{
@@ -76,34 +81,41 @@ function showFields(){
  });
  document.getElementById('askingWrap').style.display=s==='new'&&methodEl.value==='price'?'':'none';
 }
-function agentName(){
- if(agentPick.value==='__other')return agentOther.value.trim();
- return agentPick.value.trim();
+function pickedName(pick, other){
+ if(pick.value==='__other')return other.value.trim();
+ return pick.value.trim();
 }
-agentPick.onchange=()=>{agentOther.style.display=agentPick.value==='__other'?'':'none';if(agentPick.value==='__other')agentOther.focus()};
+function wireOther(pick, other){
+ pick.onchange=()=>{other.style.display=pick.value==='__other'?'':'none';if(pick.value==='__other')other.focus()};
+}
+wireOther(agentPick, agentOther);
+wireOther(agent2Pick, agent2Other);
 statusEl.onchange=showFields;
 methodEl.onchange=showFields;
 async function loadAgents(){
  const d=await api('/api/board/agents');
  const names=(d.agents||[]).map(a=>a.name).filter(Boolean);
- const opts=['<option value="">Choose an agent</option>'].concat(names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`),['<option value="__other">Type a name</option>']);
- agentPick.innerHTML=opts.join('');
+ const team=names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+ agentPick.innerHTML=['<option value="">Choose an agent</option>',team,'<option value="__other">Type a name</option>'].join('');
+ agent2Pick.innerHTML=['<option value="">None</option>',team,'<option value="__other">Type a name</option>'].join('');
 }
 document.getElementById('form').onsubmit=async ev=>{
  ev.preventDefault();
  document.getElementById('formErr').textContent='';
  document.getElementById('formOk').textContent='';
  const s=statusEl.value;
- const body={status:s,address:address.value,agent:agentName(),cv:'',method:'',asking_price:'',sale_price:'',condition_text:'',cond_price:''};
+ const body={status:s,address:address.value,agent:pickedName(agentPick,agentOther),agent2:pickedName(agent2Pick,agent2Other),cv:'',method:'',asking_price:'',sale_price:'',condition_text:'',cond_price:''};
  if(s==='new'){body.cv=cv.value;body.method=methodEl.value;if(methodEl.value==='price')body.asking_price=asking.value}
  if(s==='sold')body.sale_price=sale.value;
  if(s==='conditional'){body.condition_text=condition.value;body.cond_price=condPrice.value}
  try{
   await api('/api/board/items',{body});
   document.getElementById('formOk').textContent='Saved. Add the next listing below.';
-  address.value=cv.value=asking.value=sale.value=condition.value=condPrice.value=agentOther.value='';
+  address.value=cv.value=asking.value=sale.value=condition.value=condPrice.value=agentOther.value=agent2Other.value='';
   agentPick.value='';
+  agent2Pick.value='';
   agentOther.style.display='none';
+  agent2Other.style.display='none';
   if(s==='new')methodEl.value='auction';
   showFields();
   address.focus();

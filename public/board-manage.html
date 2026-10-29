@@ -27,6 +27,9 @@
     <div><label for="address">Address</label><input id="address" maxlength="200" required placeholder="12 Example Street"></div>
     <div><label for="suburb">Suburb</label><input id="suburb" maxlength="80"></div>
     <div><label for="agent">Agent</label><input id="agent" maxlength="80"></div>
+    <div><label for="agent2Pick">Second agent (optional)</label>
+     <select id="agent2Pick"><option value="">None</option><option value="__other">Type a name</option></select>
+     <input id="agent2Other" maxlength="80" placeholder="Second agent name" style="display:none;margin-top:8px" autocomplete="off"></div>
     <div><label for="cv">CV</label><input id="cv" maxlength="80" placeholder="Leave blank if unknown"></div>
     <div><label for="method">Method of sale</label><select id="method">
      <option value="">Not set</option>
@@ -54,13 +57,17 @@ const METHOD={auction:'Auction',negotiation:'Price by Negotiation',deadline:'Dea
 const STATUS={new:'New',conditional:'Conditional',sold:'Sold'};
 function val(id){return document.getElementById(id).value}
 function setv(id,v){document.getElementById(id).value=v??''}
-function payload(){return {address:val('address'),suburb:val('suburb'),agent:val('agent'),cv:val('cv'),method:val('method'),asking_price:val('asking'),sale_price:val('sale'),condition_text:val('condition'),cond_price:val('condPrice'),status:val('status'),hidden:document.getElementById('hidden').checked}}
-function resetForm(){document.getElementById('form').reset();setv('id','');setv('status','new');document.getElementById('formTitle').textContent='Add or change a listing';document.getElementById('saveBtn').textContent='Save';document.getElementById('cancelEdit').style.display='none';document.getElementById('formErr').textContent=''}
-function editItem(id){const it=items.find(x=>x.id===id);if(!it)return;setv('id',it.id);setv('address',it.address);setv('suburb',it.suburb);setv('agent',it.agent);setv('cv',it.cv);setv('method',it.method||'');setv('asking',it.asking_price);setv('sale',it.sale_price);setv('condition',it.condition_text);setv('condPrice',it.cond_price);setv('status',it.status);document.getElementById('hidden').checked=!!it.hidden;document.getElementById('formTitle').textContent='Edit listing';document.getElementById('saveBtn').textContent='Save changes';document.getElementById('cancelEdit').style.display='';document.getElementById('formErr').textContent='';window.scrollTo({top:0,behavior:'smooth'})}
+function secondAgent(){const pick=document.getElementById('agent2Pick');if(pick.value==='__other')return document.getElementById('agent2Other').value.trim();return pick.value.trim()}
+function payload(){return {address:val('address'),suburb:val('suburb'),agent:val('agent'),agent2:secondAgent(),cv:val('cv'),method:val('method'),asking_price:val('asking'),sale_price:val('sale'),condition_text:val('condition'),cond_price:val('condPrice'),status:val('status'),hidden:document.getElementById('hidden').checked}}
+function showSecondOther(){const pick=document.getElementById('agent2Pick');const other=document.getElementById('agent2Other');other.style.display=pick.value==='__other'?'':'none'}
+function resetForm(){document.getElementById('form').reset();setv('id','');setv('status','new');document.getElementById('agent2Other').value='';showSecondOther();document.getElementById('formTitle').textContent='Add or change a listing';document.getElementById('saveBtn').textContent='Save';document.getElementById('cancelEdit').style.display='none';document.getElementById('formErr').textContent=''}
+function setSecondAgent(name){const pick=document.getElementById('agent2Pick');const other=document.getElementById('agent2Other');const v=name||'';if(!v){pick.value='';other.value='';showSecondOther();return}if([...pick.options].some(o=>o.value===v)){pick.value=v;other.value='';showSecondOther();return}pick.value='__other';other.value=v;showSecondOther()}
+function editItem(id){const it=items.find(x=>x.id===id);if(!it)return;setv('id',it.id);setv('address',it.address);setv('suburb',it.suburb);setv('agent',it.agent);setSecondAgent(it.agent2);setv('cv',it.cv);setv('method',it.method||'');setv('asking',it.asking_price);setv('sale',it.sale_price);setv('condition',it.condition_text);setv('condPrice',it.cond_price);setv('status',it.status);document.getElementById('hidden').checked=!!it.hidden;document.getElementById('formTitle').textContent='Edit listing';document.getElementById('saveBtn').textContent='Save changes';document.getElementById('cancelEdit').style.display='';document.getElementById('formErr').textContent='';window.scrollTo({top:0,behavior:'smooth'})}
 function place(it){const a=it.address||'',s=it.suburb||'';if(!s||a.toLowerCase().includes(s.toLowerCase()))return a;return a+', '+s}
 function line(it){
  const bits=[];
- if(it.agent)bits.push(esc(it.agent));
+ if(it.agent&&it.agent2)bits.push(esc(it.agent)+' &amp; '+esc(it.agent2));
+ else if(it.agent||it.agent2)bits.push(esc(it.agent||it.agent2));
  if(it.status==='new'){const m=it.method==='price'?(it.asking_price?`Price ${esc(it.asking_price)}`:'Price'):esc(METHOD[it.method]||'');if(m)bits.push(m);bits.push('CV '+(it.cv?esc(it.cv):'—'))}
  if(it.status==='sold')bits.push(it.sale_price?`Sale price ${esc(it.sale_price)}`:'Sale price not shown');
  if(it.status==='conditional'){if(it.condition_text)bits.push(esc(it.condition_text));bits.push(it.cond_price?`Price ${esc(it.cond_price)}`:'Price —')}
@@ -74,7 +81,10 @@ function render(){
   return `<h2>${STATUS[status]} <span class="muted">${rows.length}</span></h2>${body}`;
  }).join('');
 }
+async function loadAgents(){const d=await api('/api/board/agents');const names=(d.agents||[]).map(a=>a.name).filter(Boolean);const team=names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');document.getElementById('agent2Pick').innerHTML=['<option value="">None</option>',team,'<option value="__other">Type a name</option>'].join('')}
+document.getElementById('agent2Pick').onchange=()=>{showSecondOther();if(document.getElementById('agent2Pick').value==='__other')document.getElementById('agent2Other').focus()};
 async function load(){const d=await api('/api/board/manage');items=d.items||[];render()}
+loadAgents();
 document.getElementById('form').onsubmit=async ev=>{
  ev.preventDefault();
  document.getElementById('formErr').textContent='';document.getElementById('formOk').textContent='';

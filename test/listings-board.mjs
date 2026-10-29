@@ -55,6 +55,11 @@ test('board input keeps a conditional price and only untouched website rows are 
   });
   assert.equal(ok.value.cond_price, '$910,000');
   assert.equal(ok.value.condition_text, 'subject to finance, due 5 Nov');
+  assert.equal(ok.value.agent2, null);
+  const two = listings.readBoardInput({ status: 'new', address: '1 Lane', agent: 'Ada Admin', agent2: '  Isaiah Stringer  ' });
+  assert.equal(two.value.agent, 'Ada Admin');
+  assert.equal(two.value.agent2, 'Isaiah Stringer');
+  assert.equal(listings.readBoardInput({ status: 'sold', address: '1 Lane', agent2: '   ' }).value.agent2, null);
   assert.equal(listings.readBoardInput({ status: 'sold', address: '  ' }).error, 'Address is required');
   assert.equal(listings.shouldDropFeedRow({ origin: 'feed', admin_edited: 0 }), true);
   assert.equal(listings.shouldDropFeedRow({ origin: 'feed', admin_edited: 1 }), false);
@@ -89,6 +94,13 @@ test('startup removes untouched website rows and keeps hand-entered ones', async
     assert.equal(blob.includes('2 Kept Road'), true);
     assert.equal(blob.includes('3 Hand Road'), true);
     assert.equal(board.json.conditional[0].cond_price, '$500,000');
+    assert.equal(board.json.conditional[0].agent2, null);
+    const db2info = new Database(path.join(data, 'data.db'), { readonly: true });
+    const agent2Col = db2info.prepare('PRAGMA table_info(board_listings)').all().find(c => c.name === 'agent2');
+    assert.ok(agent2Col);
+    assert.equal(agent2Col.notnull, 0);
+    assert.equal(db2info.prepare("SELECT agent2 FROM board_listings WHERE address='3 Hand Road'").get().agent2, null);
+    db2info.close();
     const db2 = new Database(path.join(data, 'data.db'), { readonly: true });
     assert.equal(db2.prepare("SELECT COUNT(*) AS n FROM board_listings WHERE address='1 Website Road'").get().n, 0);
     assert.equal(db2.prepare("SELECT COUNT(*) AS n FROM board_listings WHERE address='2 Kept Road'").get().n, 1);
@@ -172,6 +184,8 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.match(board.text, /Agent/);
     assert.match(board.text, /CV/);
     assert.match(board.text, /Method of sale/);
+    assert.match(board.text, /agent2/);
+    assert.match(board.text, /white-space:nowrap/);
     assert.match(board.text, /SOLD/);
     assert.match(board.text, /Conditions/);
     assert.match(board.text, /No listings yet/);
@@ -193,6 +207,8 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.match(add.text, /Sale price/);
     assert.match(add.text, /Conditions/);
     assert.match(add.text, />Save</);
+    assert.match(add.text, /Second agent \(optional\)/);
+    assert.match(add.text, /id="agent2Pick"/);
     assert.doesNotMatch(add.text, /website/i);
 
     const manage = await hit(app.base, '/board/manage', { headers: { cookie: gary.cookie } });
@@ -200,6 +216,9 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.match(manage.text, /href="\/board\/add"/);
     assert.match(manage.text, /Conditions/);
     assert.match(manage.text, /id="condPrice"/);
+    assert.match(manage.text, /Second agent \(optional\)/);
+    assert.match(manage.text, /id="agent2Pick"/);
+    assert.match(manage.text, /Type a name/);
     assert.match(manage.text, /confirm\(/);
     assert.doesNotMatch(manage.text, /website/i);
     assert.doesNotMatch(manage.text, /Refresh from/);
@@ -221,6 +240,30 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.equal(row.method, 'auction');
     assert.equal(row.cv, '$880,000');
     assert.equal(row.agent, 'Pat Agent');
+    assert.equal(row.agent2, null);
+
+    const paired = await hit(app.base, '/api/board/items/' + id, {
+      method: 'POST', headers: gary,
+      body: JSON.stringify({ status: 'new', address: secret, agent: 'Pat Agent', agent2: 'Isaiah Stringer', cv: '$880,000', method: 'auction' }),
+    });
+    assert.equal(paired.status, 200);
+    const pairedRow = (await hit(app.base, '/api/board', { headers: { cookie: gary.cookie } })).json.new.find(r => r.address === secret);
+    assert.equal(pairedRow.agent, 'Pat Agent');
+    assert.equal(pairedRow.agent2, 'Isaiah Stringer');
+    const changed = await hit(app.base, '/api/board/items/' + id, {
+      method: 'POST', headers: gary,
+      body: JSON.stringify({ status: 'sold', address: secret, agent: 'Aman Kaushal', agent2: 'Claire Ocoma', sale_price: '$680,000' }),
+    });
+    assert.equal(changed.status, 200);
+    const changedRow = (await hit(app.base, '/api/board', { headers: { cookie: gary.cookie } })).json.sold.find(r => r.address === secret);
+    assert.equal(changedRow.agent2, 'Claire Ocoma');
+    const cleared = await hit(app.base, '/api/board/items/' + id, {
+      method: 'POST', headers: gary,
+      body: JSON.stringify({ status: 'sold', address: secret, agent: 'Aman Kaushal', agent2: '', sale_price: '$680,000' }),
+    });
+    assert.equal(cleared.status, 200);
+    const clearedRow = (await hit(app.base, '/api/board', { headers: { cookie: gary.cookie } })).json.sold.find(r => r.address === secret);
+    assert.equal(clearedRow.agent2, null);
 
     const sold = await hit(app.base, '/api/board/items', {
       method: 'POST', headers: gary,
@@ -231,7 +274,7 @@ test('only an admin can open the listings board, the add form, and manage entrie
       method: 'POST', headers: gary,
       body: JSON.stringify({
         status: 'conditional', address: '14 Example Lane', agent: 'Ada Admin',
-        condition_text: 'subject to finance, due 5 Nov', cond_price: '$910,000',
+        condition_text: 'subject to finance, due 5 Nov', cond_price: '$910,000', agent2: 'Isaiah Stringer',
       }),
     });
     assert.equal(cond.status, 200);
@@ -240,6 +283,8 @@ test('only an admin can open the listings board, the add form, and manage entrie
     const condRow = after.json.conditional.find(r => r.address === '14 Example Lane');
     assert.equal(condRow.condition_text, 'subject to finance, due 5 Nov');
     assert.equal(condRow.cond_price, '$910,000');
+    assert.equal(condRow.agent, 'Ada Admin');
+    assert.equal(condRow.agent2, 'Isaiah Stringer');
 
     const moved = await hit(app.base, '/api/board/items/' + id, {
       method: 'POST', headers: gary,

@@ -81,6 +81,7 @@ CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidde
 {
   const boardCols = new Set(db.prepare('PRAGMA table_info(board_listings)').all().map(c => c.name));
   if (!boardCols.has('cond_price')) db.exec("ALTER TABLE board_listings ADD COLUMN cond_price TEXT NOT NULL DEFAULT ''");
+  if (!boardCols.has('agent2')) db.exec('ALTER TABLE board_listings ADD COLUMN agent2 TEXT');
   // Listings are entered by hand. Drop rows that were only copied from the old website fetch.
   db.prepare("DELETE FROM board_listings WHERE origin='feed' AND COALESCE(admin_edited,0)=0").run();
 }
@@ -820,6 +821,7 @@ function boardRow(row) {
     address: row.address,
     suburb: row.suburb,
     agent: row.agent,
+    agent2: row.agent2 || null,
     cv: row.cv,
     method: row.method,
     asking_price: row.asking_price,
@@ -859,10 +861,10 @@ app.post('/api/board/items', requireAdmin, (req, res) => {
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const v = parsed.value;
   const r = db.prepare(`INSERT INTO board_listings(
-    origin, status, name, address, suburb, agent, cv, method, asking_price, sale_price, condition_text, cond_price,
+    origin, status, name, address, suburb, agent, agent2, cv, method, asking_price, sale_price, condition_text, cond_price,
     hidden, admin_edited, created_at, updated_at)
-    VALUES('manual',?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'),datetime('now'))`).run(
-    v.status, v.name, v.address, v.suburb, v.agent, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.hidden);
+    VALUES('manual',?,?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'),datetime('now'))`).run(
+    v.status, v.name, v.address, v.suburb, v.agent, v.agent2, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.hidden);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 app.post('/api/board/items/:id', requireAdmin, (req, res) => {
@@ -872,9 +874,9 @@ app.post('/api/board/items/:id', requireAdmin, (req, res) => {
   const parsed = listings.readBoardInput(req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const v = parsed.value;
-  db.prepare(`UPDATE board_listings SET status=?, name=?, address=?, suburb=?, agent=?, cv=?, method=?,
+  db.prepare(`UPDATE board_listings SET status=?, name=?, address=?, suburb=?, agent=?, agent2=?, cv=?, method=?,
     asking_price=?, sale_price=?, condition_text=?, cond_price=?, hidden=?, admin_edited=1, updated_at=datetime('now') WHERE id=?`).run(
-    v.status, v.name, v.address, v.suburb, v.agent, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.hidden, id);
+    v.status, v.name, v.address, v.suburb, v.agent, v.agent2, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.hidden, id);
   res.json({ ok: true });
 });
 app.post('/api/board/items/:id/delete', requireAdmin, (req, res) => {

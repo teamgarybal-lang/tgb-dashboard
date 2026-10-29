@@ -33,6 +33,7 @@ function readBoardInput(body) {
       address,
       suburb: cleanText(b.suburb, 80),
       agent: cleanText(b.agent, 80),
+      agent2: cleanText(b.agent2, 80) || null,
       cv: cleanText(b.cv, 80),
       method,
       asking_price: cleanText(b.asking_price, 80),
