@@ -695,7 +695,7 @@ function assertKeepsActiveAdmin(u) {
 }
 app.post('/api/admin/users', requireAdmin, (req, res) => {
   const { name, email, password, role } = req.body || {};
-  const nextRole = role == null ? 'agent' : role;
+  const nextRole = role == null || String(role).trim() === '' ? 'agent' : String(role).trim();
   if (nextRole !== 'agent' && nextRole !== 'admin') return res.status(400).json({ error: 'Role must be agent or admin' });
   if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || ''))) return res.status(400).json({ error: 'Name and a valid email are needed' });
   if (String(password || '').length < 6) return res.status(400).json({ error: 'Temporary password must be at least 6 characters' });
