@@ -82,6 +82,7 @@ CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidde
   const boardCols = new Set(db.prepare('PRAGMA table_info(board_listings)').all().map(c => c.name));
   if (!boardCols.has('cond_price')) db.exec("ALTER TABLE board_listings ADD COLUMN cond_price TEXT NOT NULL DEFAULT ''");
   if (!boardCols.has('agent2')) db.exec('ALTER TABLE board_listings ADD COLUMN agent2 TEXT');
+  if (!boardCols.has('listed_on')) db.exec('ALTER TABLE board_listings ADD COLUMN listed_on TEXT');
   // Listings are entered by hand. Drop rows that were only copied from the old website fetch.
   db.prepare("DELETE FROM board_listings WHERE origin='feed' AND COALESCE(admin_edited,0)=0").run();
 }
@@ -828,21 +829,58 @@ function boardRow(row) {
     sale_price: row.sale_price,
     condition_text: row.condition_text,
     cond_price: row.cond_price || '',
+    listed_on: row.listed_on || null,
+    created_at: row.created_at || '',
     hidden: !!row.hidden,
     origin: row.origin,
     admin_edited: !!row.admin_edited,
     updated_at: row.updated_at,
   };
 }
+function boardTvMonth() {
+  const v = getSetting('board_tv_month') || '';
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(v) ? v : '';
+}
+function aucklandDayFromUtc(sqliteTs) {
+  if (!sqliteTs) return nzDay();
+  const text = String(sqliteTs);
+  const iso = text.includes('T') ? text : text.replace(' ', 'T') + 'Z';
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return text.slice(0, 10);
+  return nzDay(dt);
+}
+function rowMonth(row) {
+  if (row.listed_on && /^\d{4}-\d{2}-\d{2}$/.test(row.listed_on)) return row.listed_on.slice(0, 7);
+  return aucklandDayFromUtc(row.created_at).slice(0, 7);
+}
+function activeBoardMonth() {
+  return boardTvMonth() || nzDay().slice(0, 7);
+}
+function monthLabel(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-NZ', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
 function visibleBoard(status) {
+  const month = activeBoardMonth();
   return db.prepare(`SELECT * FROM board_listings WHERE hidden=0 AND status=?
-    ORDER BY datetime(created_at) DESC, id DESC`).all(status).map(boardRow);
+    ORDER BY datetime(COALESCE(listed_on, created_at)) DESC, id DESC`).all(status)
+    .filter(row => rowMonth(row) === month)
+    .map(boardRow);
+}
+function boardMonthChoices() {
+  const months = new Set([nzDay().slice(0, 7), activeBoardMonth()]);
+  for (const row of db.prepare('SELECT listed_on, created_at FROM board_listings').all()) months.add(rowMonth(row));
+  return [...months].filter(Boolean).sort().reverse();
 }
 app.get('/api/board', requireAdmin, (req, res) => {
   res.set('Cache-Control', 'no-store');
+  const month = activeBoardMonth();
   res.json({
     brand: BRAND,
     refresh_minutes: 6,
+    month,
+    month_label: monthLabel(month),
+    tv_month: boardTvMonth(),
     new: visibleBoard('new'),
     sold: visibleBoard('sold'),
     conditional: visibleBoard('conditional'),
@@ -853,18 +891,26 @@ app.get('/api/board/agents', requireAdmin, (req, res) => {
 });
 app.get('/api/board/manage', requireAdmin, (req, res) => {
   const items = db.prepare(`SELECT * FROM board_listings
-    ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'sold' THEN 1 ELSE 2 END, datetime(created_at) DESC, id DESC`).all().map(boardRow);
-  res.json({ items });
+    ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'sold' THEN 1 ELSE 2 END, datetime(COALESCE(listed_on, created_at)) DESC, id DESC`).all().map(boardRow);
+  const month = activeBoardMonth();
+  res.json({ items, tv_month: boardTvMonth(), month, month_label: monthLabel(month), months: boardMonthChoices() });
+});
+app.post('/api/board/month', requireAdmin, (req, res) => {
+  const raw = String((req.body || {}).month ?? '').trim();
+  if (raw && !/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return res.status(400).json({ error: 'Choose a month, or current month' });
+  setSetting('board_tv_month', raw);
+  const month = activeBoardMonth();
+  res.json({ ok: true, tv_month: boardTvMonth(), month, month_label: monthLabel(month) });
 });
 app.post('/api/board/items', requireAdmin, (req, res) => {
   const parsed = listings.readBoardInput(req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const v = parsed.value;
   const r = db.prepare(`INSERT INTO board_listings(
-    origin, status, name, address, suburb, agent, agent2, cv, method, asking_price, sale_price, condition_text, cond_price,
+    origin, status, name, address, suburb, agent, agent2, cv, method, asking_price, sale_price, condition_text, cond_price, listed_on,
     hidden, admin_edited, created_at, updated_at)
-    VALUES('manual',?,?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'),datetime('now'))`).run(
-    v.status, v.name, v.address, v.suburb, v.agent, v.agent2, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.hidden);
+    VALUES('manual',?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'),datetime('now'))`).run(
+    v.status, v.name, v.address, v.suburb, v.agent, v.agent2, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.listed_on, v.hidden);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 app.post('/api/board/items/:id', requireAdmin, (req, res) => {
@@ -875,8 +921,8 @@ app.post('/api/board/items/:id', requireAdmin, (req, res) => {
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const v = parsed.value;
   db.prepare(`UPDATE board_listings SET status=?, name=?, address=?, suburb=?, agent=?, agent2=?, cv=?, method=?,
-    asking_price=?, sale_price=?, condition_text=?, cond_price=?, hidden=?, admin_edited=1, updated_at=datetime('now') WHERE id=?`).run(
-    v.status, v.name, v.address, v.suburb, v.agent, v.agent2, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.hidden, id);
+    asking_price=?, sale_price=?, condition_text=?, cond_price=?, listed_on=?, hidden=?, admin_edited=1, updated_at=datetime('now') WHERE id=?`).run(
+    v.status, v.name, v.address, v.suburb, v.agent, v.agent2, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.listed_on, v.hidden, id);
   res.json({ ok: true });
 });
 app.post('/api/board/items/:id/delete', requireAdmin, (req, res) => {

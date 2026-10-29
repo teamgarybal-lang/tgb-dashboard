@@ -61,6 +61,12 @@ test('board input keeps a conditional price and only untouched website rows are 
   assert.equal(two.value.agent2, 'Isaiah Stringer');
   assert.equal(listings.readBoardInput({ status: 'sold', address: '1 Lane', agent2: '   ' }).value.agent2, null);
   assert.equal(listings.readBoardInput({ status: 'sold', address: '  ' }).error, 'Address is required');
+  assert.equal(ok.value.listed_on, null);
+  assert.equal(listings.readBoardInput({ status: 'new', address: '1 Lane', listed_on: '2020-01-15' }).value.listed_on, '2020-01-15');
+  assert.equal(listings.readBoardInput({ status: 'new', address: '1 Lane', listed_on: '2020-13-40' }).error, 'Date must be a real calendar day');
+  assert.equal(listings.formatAgents('Aman Kaushal', 'Isaiah Stringer'), 'Aman K & Isaiah S');
+  assert.equal(listings.formatAgents('Claire Ocoma', ''), 'Claire Ocoma');
+  assert.equal(listings.formatAgents('', ''), '');
   assert.equal(listings.shouldDropFeedRow({ origin: 'feed', admin_edited: 0 }), true);
   assert.equal(listings.shouldDropFeedRow({ origin: 'feed', admin_edited: 1 }), false);
   assert.equal(listings.shouldDropFeedRow({ origin: 'manual', admin_edited: 1 }), false);
@@ -209,6 +215,7 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.match(add.text, />Save</);
     assert.match(add.text, /Second agent \(optional\)/);
     assert.match(add.text, /id="agent2Pick"/);
+    assert.match(add.text, /id="listedOn"/);
     assert.doesNotMatch(add.text, /website/i);
 
     const manage = await hit(app.base, '/board/manage', { headers: { cookie: gary.cookie } });
@@ -219,6 +226,9 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.match(manage.text, /Second agent \(optional\)/);
     assert.match(manage.text, /id="agent2Pick"/);
     assert.match(manage.text, /Type a name/);
+    assert.match(manage.text, /Month on the TV/);
+    assert.match(manage.text, /id="listedOn"/);
+    assert.match(manage.text, /id="tvMonth"/);
     assert.match(manage.text, /confirm\(/);
     assert.doesNotMatch(manage.text, /website/i);
     assert.doesNotMatch(manage.text, /Refresh from/);
@@ -307,6 +317,34 @@ test('only an admin can open the listings board, the add form, and manage entrie
     assert.match(adminHtml.text, /href="\/board\/add"/);
     assert.match(adminHtml.text, /href="\/board\/manage"/);
     assert.match(adminHtml.text, /id="tvlink"/);
+    const old = await hit(app.base, '/api/board/items', {
+      method: 'POST', headers: gary,
+      body: JSON.stringify({ status: 'conditional', address: 'OLD-MONTH-1 Queen Street', agent: 'Pat Agent', condition_text: 'finance', cond_price: '$1', listed_on: '2020-01-15' }),
+    });
+    assert.equal(old.status, 200);
+    const currentBoard = await hit(app.base, '/api/board', { headers: { cookie: gary.cookie } });
+    assert.equal(JSON.stringify(currentBoard.json).includes('OLD-MONTH-1'), false);
+    assert.match(currentBoard.json.month, /^\d{4}-\d{2}$/);
+    assert.match(currentBoard.json.month_label, /\d{4}/);
+    assert.equal(JSON.stringify(currentBoard.json).includes(secret), true);
+    const pinned = await hit(app.base, '/api/board/month', { method: 'POST', headers: gary, body: JSON.stringify({ month: '2020-01' }) });
+    assert.equal(pinned.status, 200);
+    assert.equal(pinned.json.month, '2020-01');
+    assert.equal(pinned.json.month_label, 'January 2020');
+    const january = await hit(app.base, '/api/board', { headers: { cookie: gary.cookie } });
+    assert.equal(january.json.conditional.some(r => r.address === 'OLD-MONTH-1 Queen Street'), true);
+    assert.equal(JSON.stringify(january.json).includes(secret), false);
+    const manageAll = await hit(app.base, '/api/board/manage', { headers: { cookie: gary.cookie } });
+    assert.equal(manageAll.json.items.some(r => r.address === secret), true);
+    assert.equal(manageAll.json.items.some(r => r.address === 'OLD-MONTH-1 Queen Street'), true);
+    assert.equal((await hit(app.base, '/api/board/month', { method: 'POST', headers: pat, body: JSON.stringify({ month: '2020-01' }) })).status, 403);
+    const resetMonth = await hit(app.base, '/api/board/month', { method: 'POST', headers: gary, body: JSON.stringify({ month: '' }) });
+    assert.equal(resetMonth.status, 200);
+    assert.equal(resetMonth.json.tv_month, '');
+    const back = await hit(app.base, '/api/board', { headers: { cookie: gary.cookie } });
+    assert.equal(JSON.stringify(back.json).includes('OLD-MONTH-1'), false);
+    assert.equal(JSON.stringify(back.json).includes(secret), true);
+
     const publicTv = await hit(app.base, '/tv');
     assert.equal(publicTv.status, 200);
     assert.match(publicTv.text, /Team this week/);
