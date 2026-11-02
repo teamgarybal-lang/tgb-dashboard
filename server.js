@@ -87,7 +87,7 @@ CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidde
   db.prepare("DELETE FROM board_listings WHERE origin='feed' AND COALESCE(admin_edited,0)=0").run();
 }
 
-// Entry order on every screen. Score = appr_done*5 + appr_booked*3 + cold_calls*2 + door_knocks*2 + letter_drops*1.
+// Entry order on every screen. Score = appr_done*5 + appr_booked*3 + cold_calls*0 + door_knocks*0 + letter_drops*0.
 const METRICS = ['appr_done', 'appr_booked', 'cold_calls', 'door_knocks', 'letter_drops'];
 const LABELS = { appr_done: 'Appraisals done', appr_booked: 'Appraisals booked', cold_calls: 'Cold calls', door_knocks: 'Door knocks', letter_drops: 'Letter / flyer drops' };
 const DEFAULT_TARGETS = { appr_done: 30, appr_booked: 40, cold_calls: 1500, door_knocks: 1000, letter_drops: 500 };
@@ -392,7 +392,7 @@ function sumMetrics(uid, from, to) {
   const r = db.prepare(`SELECT ${METRICS.map(m => `COALESCE(SUM(${m}),0) AS ${m}`).join(',')} FROM day_entries WHERE user_id=? AND day>=? AND day<=?`).get(uid, from, to);
   const o = blankMetrics(); METRICS.forEach(m => o[m] = r[m] || 0); return o;
 }
-function scoreOf(r) { return (r.appr_done || 0) * 5 + (r.appr_booked || 0) * 3 + (r.cold_calls || 0) * 2 + (r.door_knocks || 0) * 2 + (r.letter_drops || 0) * 1; }
+function scoreOf(r) { return (r.appr_done || 0) * 5 + (r.appr_booked || 0) * 3 + (r.cold_calls || 0) * 0 + (r.door_knocks || 0) * 0 + (r.letter_drops || 0) * 0; }
 function enteredMetrics(r) { return METRICS.some(m => (r[m] || 0) > 0); }
 
 // ---- app ----
