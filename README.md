@@ -15,6 +15,29 @@ Node.js (Express) + SQLite (`data.db`). Port 3100. Run under pm2 as `tgb-dashboa
 
 Ops: `pm2 ls`, `pm2 logs tgb-dashboard`, `pm2 restart tgb-dashboard`. Backup = copy `data.db`.
 
+Clear every KPI number for all time (leaderboard and team totals) with an admin `POST /api/admin/clear-activity`. It runs only when an admin calls it, never on startup. One SQLite transaction deletes every row in `day_entries`, `entries` (so a restart cannot copy the old weekly snapshots back), `activity`, and `weekly_metric_migration` when that table exists. It leaves `users`, `sessions`, `settings`, `pipeline_entries`, pipeline migration tables, and `board_listings` alone. Copy `data.db` first. The body must be JSON. `sid` is an admin session cookie (sign in at `/login`, then copy the cookie, or use the cookie jar below).
+
+```bash
+curl -sS -c /tmp/tgb-cookies -X POST 'https://THE-LIVE-HOST/api/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ADMIN_EMAIL","password":"ADMIN_PASSWORD"}'
+
+curl -sS -b /tmp/tgb-cookies -X POST 'https://THE-LIVE-HOST/api/admin/clear-activity' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+The same call with the cookie pasted directly:
+
+```bash
+curl -sS -X POST 'https://THE-LIVE-HOST/api/admin/clear-activity' \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: sid=PASTE_ADMIN_SESSION_COOKIE' \
+  -d '{}'
+```
+
+On the machine that runs the app, `http://127.0.0.1:3100` works in place of `https://THE-LIVE-HOST`. Success looks like `{ "ok": true, "deleted": { "day_entries": N, "entries": N, "activity": N, "weekly_metric_migration": N } }`. No cookie is 401. An agent is 403. A POST that is not JSON is 415.
+
 ## Public hosting
 Cloudflare quick tunnels can't run from this box (outbound port 7844 is blocked). SSH tunnels (localhost.run, pinggy) and localtunnel are blocked too.
 Permanent options:

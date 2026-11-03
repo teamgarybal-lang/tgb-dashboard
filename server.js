@@ -744,6 +744,32 @@ app.post('/api/admin/targets', requireAdmin, (req, res) => {
   const t = {}; METRICS.forEach(m => t[m] = Math.max(0, parseInt((req.body || {})[m], 10) || 0)); setSetting('targets', JSON.stringify(t)); res.json({ ok: true, targets: t });
 });
 app.post('/api/admin/tvkey', requireAdmin, (req, res) => { const k = newTvCode(); setSetting('tv_key', k); res.json({ ok: true, tv_key: k }); });
+
+// All-time KPI history. Not run on startup. entries and weekly_metric_migration go too:
+// the boot migration copies any unmarked weekly row back into day_entries.
+const KPI_ACTIVITY_TABLES = ['day_entries', 'entries', 'activity'];
+const KPI_ACTIVITY_OPTIONAL = ['weekly_metric_migration'];
+function clearKpiActivity() {
+  const deleted = {};
+  db.transaction(() => {
+    for (const name of [...KPI_ACTIVITY_TABLES, ...KPI_ACTIVITY_OPTIONAL]) {
+      if (!/^[a-z_]+$/.test(name)) throw new Error('Bad table');
+      const present = db.prepare("SELECT 1 AS n FROM sqlite_master WHERE type='table' AND name=?").get(name);
+      if (!present) {
+        if (KPI_ACTIVITY_TABLES.includes(name)) throw new Error('Missing ' + name);
+        deleted[name] = 0;
+        continue;
+      }
+      deleted[name] = db.prepare(`DELETE FROM ${name}`).run().changes;
+    }
+  }).immediate();
+  return deleted;
+}
+app.post('/api/admin/clear-activity', requireAdmin, (req, res) => {
+  const deleted = clearKpiActivity();
+  console.log(`Admin ${req.user.email} cleared KPI activity: ${JSON.stringify(deleted)}`);
+  res.json({ ok: true, deleted });
+});
 function csvEsc(v) { v = v == null ? '' : String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function sendCsv(res, filename, head, rows) {
   const csv = [head.join(','), ...rows.map(r => head.map(h => csvEsc(r[h])).join(','))].join('\n');
