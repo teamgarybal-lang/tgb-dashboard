@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test"
+    "test": "node --test test",
+    "opportunities": "node opportunities.js"
   },
   "keywords": [],
   "author": "",

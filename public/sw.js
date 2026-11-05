@@ -1,6 +1,6 @@
 /* Static files only. Bump CACHE when one of them changes; activate drops older caches.
    Do not add API routes or HTML pages to this list. Those must stay on the network. */
-const CACHE = 'tgb-static-v1';
+const CACHE = 'tgb-static-v2';
 const ASSETS = [
   '/static/app.css',
   '/static/common.js',
