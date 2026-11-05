@@ -120,6 +120,7 @@ test('neighbouring listings do not swap street and URL', () => {
   assert.equal(ramwall.agent_names, 'Don Ha; Ketan Patel');
   assert.equal(ramwall.office_name, 'Harcourts TGB');
   assert.equal(opportunities.addressKey('Unit 1, 143 Sykes Road', 'Manurewa'), opportunities.addressKey(sykes.street, sykes.suburb));
+  assert.equal(opportunities.addressMatchesUrl('5 & 5A Yearsley Place', 'https://www.oneroof.co.nz/property/auckland/manurewa/5-5a-yearsley-place/n7xU7'), true);
 });
 
 test('snapshots record price cuts, withdrawals and REINZ sales', () => {
@@ -275,6 +276,124 @@ test('the next collection is 5:00am Auckland, including daylight saving', () => 
   const winter = opportunities.nextAucklandHour(5, 0, new Date('2026-06-30T16:00:00Z'));
   assert.equal(new Date(winter).toISOString(), '2026-06-30T17:00:00.000Z');
   assert.equal(opportunities.daysOnMarket(Math.floor(Date.parse('2026-01-01T00:00:00+13:00') / 1000), new Date('2026-04-11T12:00:00+12:00')), 100);
+});
+
+test('auction dates are not asking prices, and search price drives the estimate gap', () => {
+  assert.equal(opportunities.parseMoney('17 Nov 2026 11:00'), null);
+  assert.equal(opportunities.parseMoney('2026'), null);
+  assert.equal(opportunities.parseMoney(2026), null);
+  assert.equal(opportunities.parseMoney('Auction'), null);
+  assert.equal(opportunities.parseMoney('By negotiation'), null);
+  assert.equal(opportunities.parseMoney('Deadline Sale 11th Nov'), null);
+  assert.equal(opportunities.parseMoney('750000'), 750000);
+  assert.equal(opportunities.parseMoney('$$575,000'), 575000);
+  assert.equal(opportunities.parseMoney('Enquiries Over $460,000'), 460000);
+  assert.equal(opportunities.parseMoney('Asking price $1,125,000'), 1125000);
+
+  const html = flightHtml([
+    ['41', {
+      street: '124 Coxhead Road', suburb: 'Manurewa', district: 'Manukau City',
+      shareLink: 'https://www.oneroof.co.nz/property/auckland/manurewa/124-coxhead-road/ZnfZG',
+      priceBold: 'By negotiation', priceSearch: '750000', priceLight: null, marketTime: 1700000000,
+      avm: { avm: '$$800,000', low: '$$720,000', high: '$$880,000', confidenceScore: 'High' },
+    }],
+    ['42', {
+      street: '16 Marr Road', suburb: 'Manurewa',
+      shareLink: 'https://www.oneroof.co.nz/property/auckland/manurewa/16-marr-road/lxAKt',
+      priceBold: 'Auction', priceLight: '17 Nov 2026 11:00', priceSearch: '925000', marketTime: 1700000000,
+    }],
+  ]);
+  const parsed = opportunities.parseOneRoofHtml(html);
+  const cox = parsed.listings.find(row => row.street === '124 Coxhead Road');
+  const marr = parsed.listings.find(row => row.street === '16 Marr Road');
+  assert.equal(cox.asking_price, null);
+  assert.equal(cox.price_search, 750000);
+  assert.equal(cox.avm, 800000);
+  assert.equal(marr.asking_price, null);
+  assert.equal(marr.price_search, 925000);
+  assert.equal(opportunities.parseDetailPage(html, cox.url).price_search, 750000);
+
+  const db = memoryDb();
+  const when = { nowIso: '2026-11-05T05:00:00+13:00', snapDate: '2026-11-05', now: new Date('2026-11-05T05:00:00+13:00') };
+  opportunities.saveSuburb(db, [cox], { ...when, searchSlug: 'suburb_manurewa-manukau-city-679' });
+  const view = opportunities.queryOpportunities(db, { type: 'under' }, when.now);
+  assert.equal(view.rows.length, 1);
+  assert.equal(view.rows[0].price_search, 750000);
+  assert.ok(view.rows[0].gap_pct < 0);
+  assert.match(view.rows[0].reason, /Search price is under the OneRoof estimate/);
+  assert.match(opportunities.toCsv(view.rows), /search_price/);
+  assert.match(opportunities.toCsv(view.rows), /750000/);
+});
+
+test('price history records drops and rises, and detail fetches are incremental', async () => {
+  const db = memoryDb();
+  const url = 'https://www.oneroof.co.nz/property/auckland/manurewa/36-ramwall-place/AAA';
+  const base = listing({ url, asking_price: 900000, price_bold: 'Asking price $900,000', market_time: Math.floor(Date.parse('2026-01-01T00:00:00+13:00') / 1000) });
+  opportunities.saveSuburb(db, [base], {
+    searchSlug: 'suburb_manurewa-manukau-city-679',
+    nowIso: '2026-11-01T05:00:00+13:00', snapDate: '2026-11-01', now: new Date('2026-11-01T05:00:00+13:00'),
+  });
+  opportunities.saveSuburb(db, [{ ...base, asking_price: 850000, price_bold: 'Asking price $850,000' }], {
+    searchSlug: 'suburb_manurewa-manukau-city-679',
+    nowIso: '2026-11-05T05:00:00+13:00', snapDate: '2026-11-05', now: new Date('2026-11-05T05:00:00+13:00'),
+  });
+  const down = opportunities.queryOpportunities(db, { type: 'drop' }, new Date('2026-11-05T05:00:00+13:00'));
+  assert.equal(down.rows.length, 1);
+  assert.equal(down.rows[0].direction, 'down');
+  assert.equal(down.rows[0].first_price, 900000);
+  assert.equal(down.rows[0].current_price, 850000);
+  assert.equal(down.rows[0].change_amount, -50000);
+  assert.equal(down.cards.drop, 1);
+  assert.equal(down.cards.rise, 0);
+  const history = opportunities.priceHistory(db, url, new Date('2026-11-05T05:00:00+13:00'));
+  assert.equal(history.events.length, 1);
+  assert.equal(history.events[0].field, 'asking');
+  assert.equal(history.events[0].old_value, 900000);
+  assert.equal(history.events[0].new_value, 850000);
+
+  opportunities.saveDetail(db, { ...base, asking_price: 880000, price_bold: 'Asking price $880,000', price_search: 880000 }, {
+    nowIso: '2026-11-06T05:00:00+13:00', snapDate: '2026-11-06', now: new Date('2026-11-06T05:00:00+13:00'),
+  });
+  const up = opportunities.queryOpportunities(db, { type: 'rise' }, new Date('2026-11-06T05:00:00+13:00'));
+  assert.equal(up.rows[0].direction, 'up');
+  assert.equal(up.rows[0].change_amount, 30000);
+
+  const fresh = db.prepare('SELECT * FROM oneroof_listings WHERE url=?').get(url);
+  assert.equal(opportunities.needsDetail({ ...fresh, price_search_fetched_at: null }, new Date('2026-11-06T05:00:00+13:00')), true);
+  assert.equal(opportunities.needsDetail(fresh, new Date('2026-11-06T05:00:00+13:00')), false);
+  const weekLater = new Date('2026-11-14T05:00:00+13:00');
+  assert.equal(opportunities.needsDetail(fresh, weekLater), true);
+  assert.equal(opportunities.needsDetail({ ...fresh, price_bold: 'Auction', price_light: '20 Nov 2026 11:00', asking_price: 880000 }, new Date('2026-11-07T05:00:00+13:00')), true);
+
+  const serp = flightHtml([
+    ['41', { street: '14 Timata Lane', suburb: 'Favona', district: 'Manukau City', shareLink: url, priceBold: 'By negotiation', priceLight: null, marketTime: 1700000000, category: 'House' }],
+    ['9', { totals: 1, pageIndex: 1 }],
+  ]);
+  const detail = flightHtml([
+    ['41', { street: '14 Timata Lane', suburb: 'Favona', shareLink: url, priceBold: 'By negotiation', priceSearch: '575000', marketTime: 1700000000, category: 'House' }],
+  ]);
+  const calls = [];
+  const runner = opportunities.createRunner({
+    db: memoryDb(),
+    suburbs: [{ slug: 'suburb_favona-manukau-city-2360', suburb: 'Favona', district: 'Manukau City' }],
+    delayMs: 0,
+    sleep: async () => {},
+    log: () => {},
+    fetchImpl: async (pageUrl) => {
+      calls.push(pageUrl);
+      const html = String(pageUrl).includes('/property/') ? detail : serp;
+      return { status: 200, text: async () => html };
+    },
+  });
+  const first = await runner.start('manual').done;
+  assert.equal(first.status, 'ok');
+  assert.match(first.message, /Search prices updated for 1/);
+  assert.equal(calls.filter(pageUrl => pageUrl.includes('/property/')).length, 1);
+  const second = await runner.start('manual').done;
+  assert.match(second.message, /already up to date/);
+  assert.equal(calls.filter(pageUrl => pageUrl.includes('/property/')).length, 1);
+  const stored = runner.status();
+  assert.equal(stored.status, 'ok');
 });
 
 function launch(data, port) {

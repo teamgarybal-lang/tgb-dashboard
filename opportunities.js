@@ -100,12 +100,25 @@ function daysOnMarket(marketTime, now = new Date()) {
 
 function parseMoney(value) {
   if (value == null || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) return value >= 1000 ? Math.round(value) : null;
-  const text = String(value).replace(/&nbsp;/g, ' ').replace(/[$£,]/g, '').trim();
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value >= 1900 && value <= 2100) return null;
+    return value >= 10000 ? Math.round(value) : null;
+  }
+  const text = unescapeDollars(String(value)).replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
   if (!text || /^(null|none|poa|n\/a|undefined)$/i.test(text)) return null;
-  if (/negotiation|application|auction|tender|deadline/i.test(text) && !/\d{4,}/.test(text)) return null;
-  const m = text.match(/(\d{4,9})/);
-  return m ? Number(m[1]) : null;
+  const dollar = text.match(/\$\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,9})/);
+  if (dollar) {
+    const n = Number(dollar[1].replace(/,/g, ''));
+    return n >= 10000 ? n : null;
+  }
+  // Auction and deadline rows put a date in priceLight. A year such as 2026 is not an asking price.
+  if (/\b(auction|deadline|tender|negotiation|application|enquir(?:y|ies)|closes|closing)\b/i.test(text)) return null;
+  if (/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.test(text)) return null;
+  if (/\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/.test(text)) return null;
+  if (/^\d{4}$/.test(text) && Number(text) >= 1900 && Number(text) <= 2100) return null;
+  const plain = text.replace(/[$,]/g, '').trim();
+  if (/^\d{5,9}$/.test(plain)) return Number(plain);
+  return null;
 }
 
 function fold(s) {
@@ -139,7 +152,7 @@ function addressKey(street, suburb) {
 function addressMatchesUrl(street, url) {
   try {
     const slug = decodeURIComponent(String(url || '')).toLowerCase().replace(/[^a-z0-9]+/g, '');
-    const folded = fold(street).replace(/[^a-z0-9]+/g, '');
+    const folded = fold(street).replace(/\band\b/g, '').replace(/[^a-z0-9]+/g, '');
     return folded.length > 2 && slug.includes(folded);
   } catch {
     return false;
@@ -163,6 +176,11 @@ function intOrNull(v) {
   if (v == null || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+function ensureColumn(db, table, name, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(col => col.name);
+  if (!cols.includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
 }
 
 function migrate(db) {
@@ -272,7 +290,21 @@ CREATE INDEX IF NOT EXISTS oneroof_listings_outcome ON oneroof_listings(outcome)
 CREATE INDEX IF NOT EXISTS oneroof_listings_addr ON oneroof_listings(address_key, suburb_key);
 CREATE INDEX IF NOT EXISTS oneroof_snapshots_url ON oneroof_snapshots(url, snapshot_date);
 CREATE INDEX IF NOT EXISTS reinz_sales_addr ON reinz_sales(address_key, suburb_key);
+CREATE TABLE IF NOT EXISTS oneroof_price_history (
+  id INTEGER PRIMARY KEY,
+  listing_id TEXT NOT NULL,
+  changed_on TEXT NOT NULL,
+  field TEXT NOT NULL,
+  old_value INTEGER,
+  new_value INTEGER,
+  UNIQUE (listing_id, changed_on, field)
+);
+CREATE INDEX IF NOT EXISTS oneroof_price_history_listing ON oneroof_price_history(listing_id, changed_on);
 `);
+  ensureColumn(db, 'oneroof_listings', 'price_search', 'INTEGER');
+  ensureColumn(db, 'oneroof_listings', 'price_search_fetched_at', 'TEXT');
+  ensureColumn(db, 'oneroof_listings', 'price_text_at_fetch', 'TEXT');
+  ensureColumn(db, 'oneroof_snapshots', 'price_search', 'INTEGER');
   const now = aucklandIso(new Date());
   db.prepare(`UPDATE oneroof_runs SET status='interrupted', finished_at=?, message=? WHERE status='running'`)
     .run(now, 'Server restarted before the collection finished');
@@ -396,6 +428,7 @@ function recordFrom(raw, refs) {
     price_bold: raw.priceBold ? unescapeDollars(decodeEntities(raw.priceBold)).trim() : null,
     price_light: raw.priceLight ? unescapeDollars(decodeEntities(raw.priceLight)).trim() : null,
     asking_price: parseMoney(raw.priceBold) || parseMoney(raw.priceLight),
+    price_search: parseMoney(raw.priceSearch),
     market_time: intOrNull(raw.marketTime),
     avm: avm.avm,
     avm_low: avm.avm_low,
@@ -449,8 +482,42 @@ function scoreRecord(rec) {
   if (rec.agent_names) score += 2;
   if (rec.avm) score += 1;
   if (rec.asking_price) score += 1;
+  if (rec.price_search) score += 3;
   if (rec.office_name) score += 1;
   return score;
+}
+
+const DETAIL_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function displayText(row) {
+  return [row && row.price_bold, row && row.price_light].filter(Boolean).join(' · ');
+}
+
+function baselinePrice(db, url, snapDate, column) {
+  const prior = db.prepare(`SELECT ${column} AS v FROM oneroof_snapshots WHERE url=? AND snapshot_date<? AND ${column} IS NOT NULL ORDER BY snapshot_date DESC LIMIT 1`).get(url, snapDate);
+  if (prior && prior.v != null) return prior.v;
+  const today = db.prepare(`SELECT ${column} AS v FROM oneroof_snapshots WHERE url=? AND snapshot_date=?`).get(url, snapDate);
+  return today && today.v != null ? today.v : null;
+}
+
+function syncPriceHistory(db, url, snapDate, field, column, current) {
+  if (current == null) return;
+  const old = baselinePrice(db, url, snapDate, column);
+  if (old == null || old === current) {
+    db.prepare('DELETE FROM oneroof_price_history WHERE listing_id=? AND changed_on=? AND field=?').run(url, snapDate, field);
+    return;
+  }
+  db.prepare(`INSERT INTO oneroof_price_history (listing_id, changed_on, field, old_value, new_value)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(listing_id, changed_on, field) DO UPDATE SET old_value=excluded.old_value, new_value=excluded.new_value`)
+    .run(url, snapDate, field, old, current);
+}
+
+function askingCut(oldAsking, asking) {
+  if (oldAsking != null && asking != null && asking !== oldAsking) {
+    return { price_cut: asking < oldAsking ? 1 : 0, price_cut_from: oldAsking, price_cut_to: asking };
+  }
+  return { price_cut: 0, price_cut_from: null, price_cut_to: null };
 }
 
 function saveSuburb(db, listings, opts) {
@@ -458,20 +525,20 @@ function saveSuburb(db, listings, opts) {
   const snapDate = opts.snapDate;
   const searchSlug = opts.searchSlug;
   const now = opts.now || new Date();
-  const selectFirst = db.prepare('SELECT first_seen FROM oneroof_listings WHERE url=?');
-  const priorPeak = db.prepare('SELECT MAX(asking_price) AS m FROM oneroof_snapshots WHERE url=? AND snapshot_date<? AND asking_price IS NOT NULL');
-  const todaySnap = db.prepare('SELECT asking_price FROM oneroof_snapshots WHERE url=? AND snapshot_date=?');
+  const selectExisting = db.prepare('SELECT first_seen, price_search FROM oneroof_listings WHERE url=?');
   const upsert = db.prepare(`INSERT INTO oneroof_listings (
     url, listing_code, uid, slug, street, suburb, district, region, search_slug,
     category, listing_type, bedrooms, bathrooms, carspaces, land_area, floor_area,
-    price_bold, price_light, asking_price, market_time, first_seen, last_seen, disappeared_at, outcome,
+    price_bold, price_light, asking_price, price_search, price_search_fetched_at, price_text_at_fetch,
+    market_time, first_seen, last_seen, disappeared_at, outcome,
     address_key, suburb_key, avm, avm_low, avm_high, rv, avm_confidence,
     agent_names, agent_phones, office_name, price_cut, price_cut_from, price_cut_to,
     sale_id, sale_price, sale_date, lat, lng
   ) VALUES (
     @url, @listing_code, @uid, @slug, @street, @suburb, @district, @region, @search_slug,
     @category, @listing_type, @bedrooms, @bathrooms, @carspaces, @land_area, @floor_area,
-    @price_bold, @price_light, @asking_price, @market_time, @first_seen, @last_seen, NULL, 'listed',
+    @price_bold, @price_light, @asking_price, @price_search, @price_search_fetched_at, @price_text_at_fetch,
+    @market_time, @first_seen, @last_seen, NULL, 'listed',
     @address_key, @suburb_key, @avm, @avm_low, @avm_high, @rv, @avm_confidence,
     @agent_names, @agent_phones, @office_name, @price_cut, @price_cut_from, @price_cut_to,
     NULL, NULL, NULL, @lat, @lng
@@ -482,6 +549,9 @@ function saveSuburb(db, listings, opts) {
     bedrooms=excluded.bedrooms, bathrooms=excluded.bathrooms, carspaces=excluded.carspaces,
     land_area=excluded.land_area, floor_area=excluded.floor_area,
     price_bold=excluded.price_bold, price_light=excluded.price_light, asking_price=excluded.asking_price,
+    price_search=COALESCE(excluded.price_search, oneroof_listings.price_search),
+    price_search_fetched_at=COALESCE(excluded.price_search_fetched_at, oneroof_listings.price_search_fetched_at),
+    price_text_at_fetch=COALESCE(excluded.price_text_at_fetch, oneroof_listings.price_text_at_fetch),
     market_time=excluded.market_time, last_seen=excluded.last_seen, disappeared_at=NULL, outcome='listed',
     address_key=excluded.address_key, suburb_key=excluded.suburb_key,
     avm=excluded.avm, avm_low=excluded.avm_low, avm_high=excluded.avm_high, rv=excluded.rv,
@@ -489,12 +559,13 @@ function saveSuburb(db, listings, opts) {
     office_name=excluded.office_name, price_cut=excluded.price_cut, price_cut_from=excluded.price_cut_from,
     price_cut_to=excluded.price_cut_to, sale_id=NULL, sale_price=NULL, sale_date=NULL, lat=excluded.lat, lng=excluded.lng`);
   const snap = db.prepare(`INSERT INTO oneroof_snapshots (
-    url, snapshot_date, suburb, price_bold, price_light, asking_price, avm, rv, market_time, days_on_market,
+    url, snapshot_date, suburb, price_bold, price_light, asking_price, price_search, avm, rv, market_time, days_on_market,
     agent_names, agent_phones, office_name, present
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
   ON CONFLICT(url, snapshot_date) DO UPDATE SET
     suburb=excluded.suburb, price_bold=excluded.price_bold, price_light=excluded.price_light,
-    asking_price=excluded.asking_price, avm=excluded.avm, rv=excluded.rv, market_time=excluded.market_time,
+    asking_price=excluded.asking_price, price_search=COALESCE(excluded.price_search, oneroof_snapshots.price_search),
+    avm=excluded.avm, rv=excluded.rv, market_time=excluded.market_time,
     days_on_market=excluded.days_on_market, agent_names=excluded.agent_names, agent_phones=excluded.agent_phones,
     office_name=excluded.office_name, present=1`);
   const absent = db.prepare(`INSERT INTO oneroof_snapshots (url, snapshot_date, suburb, present)
@@ -510,16 +581,16 @@ function saveSuburb(db, listings, opts) {
       if (!rec || !rec.url || !rec.street || seen.has(rec.url)) continue;
       seen.add(rec.url);
       const asking = rec.asking_price == null ? null : rec.asking_price;
-      const prior = priorPeak.get(rec.url, snapDate);
-      const today = todaySnap.get(rec.url, snapDate);
-      let peak = prior && prior.m ? prior.m : null;
-      if (today && today.asking_price && (peak == null || today.asking_price > peak)) peak = today.asking_price;
-      const cut = asking && peak && asking < peak
-        ? { price_cut: 1, price_cut_from: peak, price_cut_to: asking }
-        : { price_cut: 0, price_cut_from: null, price_cut_to: null };
-      const existing = selectFirst.get(rec.url);
+      const existing = selectExisting.get(rec.url);
+      const search = rec.price_search != null ? rec.price_search : (existing && existing.price_search != null ? existing.price_search : null);
+      syncPriceHistory(db, rec.url, snapDate, 'asking', 'asking_price', asking);
+      syncPriceHistory(db, rec.url, snapDate, 'price_search', 'price_search', search);
+      const cut = askingCut(baselinePrice(db, rec.url, snapDate, 'asking_price'), asking);
       upsert.run({
         ...rec,
+        price_search: rec.price_search != null ? rec.price_search : null,
+        price_search_fetched_at: rec.price_search_fetched_at || null,
+        price_text_at_fetch: rec.price_text_at_fetch || null,
         search_slug: searchSlug,
         first_seen: existing ? existing.first_seen : nowIso,
         last_seen: nowIso,
@@ -528,7 +599,7 @@ function saveSuburb(db, listings, opts) {
         ...cut,
       });
       snap.run(
-        rec.url, snapDate, rec.suburb, rec.price_bold, rec.price_light, asking, rec.avm, rec.rv,
+        rec.url, snapDate, rec.suburb, rec.price_bold, rec.price_light, asking, search, rec.avm, rec.rv,
         rec.market_time, daysOnMarket(rec.market_time, now), rec.agent_names, rec.agent_phones, rec.office_name
       );
       markSeen.run(rec.url);
@@ -543,6 +614,86 @@ function saveSuburb(db, listings, opts) {
   const saved = tx();
   matchSales(db);
   return saved;
+}
+
+function parseDetailPage(html, url) {
+  const parsed = parseOneRoofHtml(html);
+  const want = String(url || '').replace(/\/+$/, '');
+  return parsed.listings.find(row => row.url.replace(/\/+$/, '') === want) || null;
+}
+
+function needsDetail(row, now = new Date()) {
+  if (!row || row.disappeared_at) return false;
+  const fetchedAt = row.price_search_fetched_at ? Date.parse(row.price_search_fetched_at) : NaN;
+  const never = !row.price_search_fetched_at || Number.isNaN(fetchedAt);
+  if (never) return true;
+  if ((row.price_text_at_fetch || '') !== displayText(row)) return true;
+  const stale = now.getTime() - fetchedAt >= DETAIL_STALE_MS;
+  const days = daysOnMarket(row.market_time, now);
+  const interesting = (days != null && days >= 60) || row.asking_price == null;
+  return stale && interesting;
+}
+
+function saveDetail(db, rec, opts) {
+  const snapDate = opts.snapDate;
+  const nowIso = opts.nowIso;
+  const asking = rec.asking_price == null ? null : rec.asking_price;
+  const search = rec.price_search == null ? null : rec.price_search;
+  syncPriceHistory(db, rec.url, snapDate, 'asking', 'asking_price', asking);
+  syncPriceHistory(db, rec.url, snapDate, 'price_search', 'price_search', search);
+  const cut = askingCut(baselinePrice(db, rec.url, snapDate, 'asking_price'), asking);
+  db.prepare(`UPDATE oneroof_listings SET
+    price_bold=?, price_light=?, asking_price=?,
+    price_search=COALESCE(?, price_search),
+    price_search_fetched_at=?,
+    price_text_at_fetch=?,
+    avm=COALESCE(?, avm), avm_low=COALESCE(?, avm_low), avm_high=COALESCE(?, avm_high),
+    rv=COALESCE(?, rv), avm_confidence=COALESCE(?, avm_confidence),
+    agent_names=COALESCE(?, agent_names), agent_phones=COALESCE(?, agent_phones), office_name=COALESCE(?, office_name),
+    price_cut=?, price_cut_from=?, price_cut_to=?
+    WHERE url=?`).run(
+    rec.price_bold, rec.price_light, asking,
+    search, nowIso, displayText(rec),
+    rec.avm, rec.avm_low, rec.avm_high, rec.rv, rec.avm_confidence,
+    rec.agent_names, rec.agent_phones, rec.office_name,
+    cut.price_cut, cut.price_cut_from, cut.price_cut_to,
+    rec.url
+  );
+  const existingSnap = db.prepare('SELECT 1 AS n FROM oneroof_snapshots WHERE url=? AND snapshot_date=?').get(rec.url, snapDate);
+  if (existingSnap) {
+    db.prepare(`UPDATE oneroof_snapshots SET price_bold=?, price_light=?, asking_price=?, price_search=COALESCE(?, price_search), avm=COALESCE(?, avm)
+      WHERE url=? AND snapshot_date=?`).run(rec.price_bold, rec.price_light, asking, search, rec.avm, rec.url, snapDate);
+  } else {
+    db.prepare(`INSERT INTO oneroof_snapshots (url, snapshot_date, suburb, price_bold, price_light, asking_price, price_search, avm, present)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`).run(rec.url, snapDate, rec.suburb || null, rec.price_bold, rec.price_light, asking, search, rec.avm);
+  }
+}
+
+async function hydrateDetails(db, ctx) {
+  const now = ctx.now || new Date();
+  const queue = db.prepare('SELECT * FROM oneroof_listings WHERE disappeared_at IS NULL').all()
+    .filter(row => needsDetail(row, now))
+    .sort((a, b) => (daysOnMarket(b.market_time, now) || 0) - (daysOnMarket(a.market_time, now) || 0));
+  let done = 0;
+  for (const row of queue) {
+    if (ctx.polite) await ctx.polite();
+    ctx.log(`[opportunities] GET ${row.url}`);
+    const fetched = await fetchHtml(row.url, ctx);
+    if (fetched.blocked) {
+      return { stopped: true, done, total: queue.length, message: fetched.message };
+    }
+    done++;
+    if (ctx.onDetail) ctx.onDetail({ done, total: queue.length, street: row.street });
+    const detail = parseDetailPage(fetched.html, row.url);
+    if (!detail) {
+      ctx.log(`[opportunities] detail payload missing for ${row.url}`);
+      db.prepare('UPDATE oneroof_listings SET price_search_fetched_at=?, price_text_at_fetch=? WHERE url=?')
+        .run(ctx.nowIso, displayText(row), row.url);
+      continue;
+    }
+    saveDetail(db, detail, ctx);
+  }
+  return { stopped: false, done, total: queue.length };
 }
 
 function formatMoney(n) {
@@ -570,19 +721,62 @@ function reasonFor(row) {
     if (row.days >= 300) bits.push('Still listed after 300+ days - approach with a fresh plan');
     else if (row.days >= 90) bits.push('Still listed after 90+ days - approach with a fresh plan');
     else if (row.days >= 60) bits.push('Still listed after 60 days - worth a conversation');
-    if (row.price_cut && row.price_cut_from && row.price_cut_to) {
-      bits.push(`Asking dropped from ${formatMoney(row.price_cut_from)} to ${formatMoney(row.price_cut_to)}`);
-    } else if (row.price_cut) bits.push('The asking price has been cut');
-    if (row.asking && row.avm && row.asking < row.avm) bits.push('Asking is under the OneRoof estimate');
+    if (row.direction === 'down' && row.change_from != null && row.change_to != null) {
+      const label = row.change_field === 'price_search' ? 'Search price' : 'Asking';
+      bits.push(`${label} dropped from ${formatMoney(row.change_from)} to ${formatMoney(row.change_to)}`);
+    } else if (row.direction === 'up' && row.change_from != null && row.change_to != null) {
+      const label = row.change_field === 'price_search' ? 'Search price' : 'Asking';
+      bits.push(`${label} increased from ${formatMoney(row.change_from)} to ${formatMoney(row.change_to)}`);
+    }
+    const compared = row.asking || row.price_search;
+    if (compared && row.avm && compared < row.avm) {
+      bits.push(row.asking ? 'Asking is under the OneRoof estimate' : 'Search price is under the OneRoof estimate');
+    }
   }
   return bits.join('. ') || 'On the market';
 }
 
-function shape(row, now) {
+function storyFor(events, asking, priceSearch) {
+  const preferred = asking != null ? 'asking' : 'price_search';
+  const current = asking != null ? asking : (priceSearch != null ? priceSearch : null);
+  const series = (events || []).filter(event => event.field === preferred);
+  const base = {
+    first_price: current,
+    current_price: current,
+    last_change_date: null,
+    change_amount: null,
+    change_pct: null,
+    direction: null,
+    changes: 0,
+    change_field: preferred,
+    change_from: null,
+    change_to: null,
+  };
+  if (!series.length) return base;
+  const last = series[series.length - 1];
+  const amount = last.new_value - last.old_value;
+  return {
+    first_price: series[0].old_value,
+    current_price: current != null ? current : last.new_value,
+    last_change_date: last.changed_on,
+    change_amount: amount,
+    change_pct: last.old_value ? Math.round((amount / last.old_value) * 1000) / 10 : null,
+    direction: amount > 0 ? 'up' : amount < 0 ? 'down' : null,
+    changes: series.length,
+    change_field: preferred,
+    change_from: last.old_value,
+    change_to: last.new_value,
+  };
+}
+
+function shape(row, now, events) {
   const days = daysOnMarket(row.market_time, now);
   const asking = row.asking_price == null ? null : row.asking_price;
+  const priceSearch = row.price_search == null ? null : row.price_search;
   const avm = row.avm == null ? null : row.avm;
-  const gap = asking && avm ? Math.round((asking - avm) / avm * 1000) / 10 : null;
+  const compare = asking || priceSearch || null;
+  const gap = compare && avm ? Math.round((compare - avm) / avm * 1000) / 10 : null;
+  const story = storyFor(events, asking, priceSearch);
   const shaped = {
     url: row.url,
     street: row.street || '',
@@ -595,8 +789,10 @@ function shape(row, now) {
     days,
     price_display: [row.price_bold, row.price_light].filter(Boolean).join(' · '),
     asking,
+    price_search: priceSearch,
     avm,
     gap_pct: gap,
+    ...story,
     outcome: row.outcome || 'listed',
     status: row.outcome === 'sold' ? 'Sold' : row.outcome === 'withdrawn' ? 'Withdrawn / likely unsold' : 'Listed',
     price_cut: !!row.price_cut,
@@ -615,8 +811,10 @@ function matchesType(row, type) {
   if (type === '90+') return row.outcome === 'listed' && row.days != null && row.days >= 90;
   if (type === '300+') return row.outcome === 'listed' && row.days != null && row.days >= 300;
   if (type === 'withdrawn') return row.outcome === 'withdrawn';
-  if (type === 'under') return row.outcome === 'listed' && row.asking && row.avm && row.asking < row.avm;
-  if (type === 'cut') return row.outcome === 'listed' && row.price_cut;
+  const compare = row.asking || row.price_search;
+  if (type === 'under') return row.outcome === 'listed' && compare && row.avm && compare < row.avm;
+  if (type === 'cut' || type === 'drop') return row.outcome === 'listed' && row.direction === 'down';
+  if (type === 'rise') return row.outcome === 'listed' && row.direction === 'up';
   if (type === 'sold') return row.outcome === 'sold';
   return true;
 }
@@ -628,7 +826,9 @@ function cardsOf(rows) {
     d300: rows.filter(r => matchesType(r, '300+')).length,
     withdrawn: rows.filter(r => matchesType(r, 'withdrawn')).length,
     under: rows.filter(r => matchesType(r, 'under')).length,
-    cut: rows.filter(r => matchesType(r, 'cut')).length,
+    drop: rows.filter(r => matchesType(r, 'drop')).length,
+    rise: rows.filter(r => matchesType(r, 'rise')).length,
+    cut: rows.filter(r => matchesType(r, 'drop')).length,
     sold: rows.filter(r => matchesType(r, 'sold')).length,
   };
 }
@@ -653,7 +853,8 @@ function compareRows(a, b, key, dir) {
 
 const SORT_KEYS = {
   address: 'street', suburb: 'suburb', agent: 'agent_names', agency: 'office_name',
-  days: 'days', price: 'asking', asking: 'asking', estimate: 'avm', gap: 'gap_pct',
+  days: 'days', price: 'asking', asking: 'asking', search: 'price_search', change: 'change_amount',
+  estimate: 'avm', gap: 'gap_pct',
   status: 'status', reason: 'reason',
 };
 
@@ -661,8 +862,42 @@ function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'en-NZ'));
 }
 
+function historyByListing(db) {
+  const grouped = new Map();
+  const events = db.prepare('SELECT listing_id, changed_on, field, old_value, new_value FROM oneroof_price_history ORDER BY changed_on, id').all();
+  for (const event of events) {
+    if (!grouped.has(event.listing_id)) grouped.set(event.listing_id, []);
+    grouped.get(event.listing_id).push(event);
+  }
+  return grouped;
+}
+
+function priceHistory(db, url, now = new Date()) {
+  const row = db.prepare('SELECT * FROM oneroof_listings WHERE url=?').get(url);
+  if (!row) return null;
+  const events = db.prepare('SELECT changed_on, field, old_value, new_value FROM oneroof_price_history WHERE listing_id=? ORDER BY changed_on, id').all(url);
+  const shaped = shape(row, now, events);
+  return {
+    url,
+    street: row.street,
+    suburb: row.suburb,
+    events,
+    summary: {
+      first_price: shaped.first_price,
+      current_price: shaped.current_price,
+      last_change_date: shaped.last_change_date,
+      change_amount: shaped.change_amount,
+      change_pct: shaped.change_pct,
+      direction: shaped.direction,
+      changes: shaped.changes,
+      change_field: shaped.change_field,
+    },
+  };
+}
+
 function queryOpportunities(db, filters = {}, now = new Date()) {
-  const all = db.prepare('SELECT * FROM oneroof_listings').all().map(row => shape(row, now));
+  const grouped = historyByListing(db);
+  const all = db.prepare('SELECT * FROM oneroof_listings').all().map(row => shape(row, now, grouped.get(row.url) || []));
   const sortKey = SORT_KEYS[filters.sort] || 'days';
   const dir = filters.dir === 'asc' ? 'asc' : 'desc';
   let rows = all;
@@ -705,8 +940,16 @@ const CSV_COLUMNS = [
   ['days_listed', 'days'],
   ['price_display', 'price_display'],
   ['asking', 'asking'],
+  ['search_price', 'price_search'],
+  ['first_price', 'first_price'],
+  ['current_price', 'current_price'],
+  ['last_change_date', 'last_change_date'],
+  ['change_amount', 'change_amount'],
+  ['change_pct', 'change_pct'],
+  ['direction', 'direction'],
+  ['price_changes', 'changes'],
   ['estimate', 'avm'],
-  ['gap_pct', 'gap_pct'],
+  ['vs_estimate_pct', 'gap_pct'],
   ['status', 'status'],
   ['reason', 'reason'],
   ['sale_price', 'sale_price'],
@@ -1091,6 +1334,9 @@ function createRunner(opts) {
         if (firstRequest) { firstRequest = false; return; }
         await sleep(delayMs);
       },
+      onDetail: (info) => {
+        update(`Search prices ${info.done}/${info.total}${info.street ? ' · ' + info.street : ''}`);
+      },
       onPage: (infoPage) => {
         const pageNote = infoPage.totals != null ? ` of about ${Math.ceil(infoPage.totals / PAGE_SIZE)}` : '';
         db.prepare(`UPDATE oneroof_runs SET pages_fetched=?, listings_seen=?, message=? WHERE id=?`).run(
@@ -1112,8 +1358,13 @@ function createRunner(opts) {
         progress.done++;
         update(`${suburb.suburb} saved (${progress.done}/${suburbList.length})`);
       }
+      const detail = await hydrateDetails(db, ctx);
+      if (detail.stopped) return finish('blocked', detail.message);
       const suburbWord = progress.done === 1 ? 'suburb' : 'suburbs';
-      return finish('ok', `Saved ${progress.seen} listings across ${progress.done} ${suburbWord}. ${progress.disappeared} disappeared.`);
+      const priceNote = detail.total
+        ? `Search prices updated for ${detail.done} of ${detail.total} listings.`
+        : 'Search prices already up to date.';
+      return finish('ok', `Saved ${progress.seen} listings across ${progress.done} ${suburbWord}. ${progress.disappeared} disappeared. ${priceNote}`);
     } catch (err) {
       const message = err && err.message ? err.message : 'Collection failed';
       log(`[opportunities] error ${message}`);
@@ -1187,6 +1438,11 @@ module.exports = {
   normaliseAddress,
   addressMatchesUrl,
   saveSuburb,
+  saveDetail,
+  needsDetail,
+  parseDetailPage,
+  hydrateDetails,
+  priceHistory,
   importReinzCsv,
   matchSales,
   queryOpportunities,
