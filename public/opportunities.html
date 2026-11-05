@@ -29,13 +29,21 @@
     <option value="60-89">60–89 days</option>
     <option value="90+">90+ days</option>
     <option value="300+">300+ days</option>
-    <option value="withdrawn">Withdrawn / likely unsold</option>
+    <option value="withdrawn">Left OneRoof (not confirmed)</option>
     <option value="under">Under OneRoof estimate</option>
     <option value="drop">Price dropped</option>
     <option value="rise">Price increased</option>
     <option value="sold">Sold</option>
    </select></div>
    <div><label for="fCategory">Category</label><select id="fCategory"><option value="">All categories</option></select></div>
+   <div><label for="fVerify">Agency check</label><select id="fVerify">
+    <option value="">Any check</option>
+    <option value="unchecked">Not checked</option>
+    <option value="unverified">Unverified</option>
+    <option value="confirmed_withdrawn">Confirmed withdrawn</option>
+    <option value="confirmed_sold">Confirmed sold</option>
+    <option value="still_active">Still active</option>
+   </select></div>
    <div><label for="fMin">Days listed, from</label><input id="fMin" type="number" min="0" inputmode="numeric"></div>
    <div><label for="fMax">Days listed, to</label><input id="fMax" type="number" min="0" inputmode="numeric"></div>
   </div>
@@ -51,6 +59,14 @@
   <p class="muted">Tick rows to export those, or leave them clear to export every row in the current filter.</p>
   <div class="scroll"><table id="tbl"></table></div>
   <p class="muted" id="empty" style="display:none">No listings match. Run a collection, or widen the filters.</p>
+ </div>
+ <div class="card" id="verifyCard">
+  <div class="row" style="justify-content:space-between">
+   <h2 style="margin:0">Agency check</h2>
+   <div class="row"><a class="btn sec" href="/api/admin/opportunities/verification/report.csv">Check CSV</a><button class="sec" id="verifyBtn" onclick="runVerify()">Check listings that left OneRoof</button></div>
+  </div>
+  <p class="muted">A home that disappears from OneRoof is not confirmed withdrawn. This check reads the public company website only. Sold or withdrawn is recorded when that page shows the same address with those words. A missing page, a 404, or the word sold in a footer is not enough. There is no Monday or Friday timer in this app. The 9am routine calls the check, and the check waits while the 5am crawl is still running.</p>
+  <div id="verifyBox" class="hint">No agency check yet.</div>
  </div>
  <div class="card">
   <h2>REINZ sales</h2>
@@ -68,13 +84,13 @@ let D=null, sort='days', dir='desc', selected=new Set(), poll=null, wasRunning=f
 const COLS=[
  ['address','Address'],['suburb','Suburb'],['agent','Agent'],['agency','Agency'],
  ['days','Days'],['price','Price'],['asking','Asking'],['search','Search price'],
- ['change','Change'],['estimate','Estimate'],['gap','vs estimate'],['status','Status'],['reason','Reason']
+ ['change','Change'],['estimate','Estimate'],['gap','vs estimate'],['status','Status'],['verification','Agency check'],['reason','Reason']
 ];
 const money=n=>n==null||n===''?'':Number(n).toLocaleString('en-NZ',{style:'currency',currency:'NZD',maximumFractionDigits:0});
 const when=iso=>{if(!iso)return '';const d=new Date(iso);if(Number.isNaN(d.getTime()))return esc(iso);return d.toLocaleString('en-NZ',{timeZone:'Pacific/Auckland',day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})};
 function agents(r){const n=String(r.agent_names||'').split(';').map(s=>s.trim()).filter(Boolean);const p=String(r.agent_phones||'').split(';').map(s=>s.trim());if(!n.length)return p.filter(Boolean).join('; ');return n.map((name,i)=>p[i]?name+' ('+p[i]+')':name).join('; ')}
 function gapText(g){if(g==null)return '';const abs=Math.abs(g).toFixed(1).replace(/\.0$/,'');if(g<0)return abs+'% under';if(g>0)return abs+'% over';return 'even'}
-function filters(){return {suburb:$('#fSuburb').value,district:$('#fDistrict').value,type:$('#fType').value,category:$('#fCategory').value,min_days:$('#fMin').value,max_days:$('#fMax').value,sort,dir}}
+function filters(){return {suburb:$('#fSuburb').value,district:$('#fDistrict').value,type:$('#fType').value,category:$('#fCategory').value,verification:$('#fVerify').value,min_days:$('#fMin').value,max_days:$('#fMax').value,sort,dir}}
 function query(){const q=new URLSearchParams();const f=filters();Object.entries(f).forEach(([k,v])=>{if(v!==''&&v!=null)q.set(k,v)});return q.toString()}
 function fill(sel,values,label){const keep=sel.value;sel.innerHTML=`<option value="">${label}</option>`+values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');sel.value=values.includes(keep)?keep:''}
 function renderCards(){const c=D.cards||{};const items=[
@@ -103,12 +119,14 @@ function renderTable(){const rows=D.rows||[];$('#shown').textContent=rows.length
  const body=rows.map(r=>{const on=selected.has(r.url)?' checked':'';const pill=r.outcome==='sold'?'sold':r.outcome==='withdrawn'?'withdrawn':'listed';
   const link=String(r.url||'').startsWith('https://www.oneroof.co.nz/')?`<a href="${esc(r.url)}" target="_blank" rel="noopener">Open</a>`:'';
   const gap=r.gap_pct==null?'':`<span class="${r.gap_pct<0?'chg-down':'chg-up'}">${esc(gapText(r.gap_pct))}</span>`;
+  const evidence=String(r.evidence_url||'').startsWith('https://')?`<a href="${esc(r.evidence_url)}" target="_blank" rel="noopener">Evidence</a>`:'';
+  const check=`<div>${esc(r.verification_label||'Not checked')}</div>${evidence}${r.evidence_excerpt?`<div class="sub">${esc(r.evidence_excerpt)}</div>`:''}${r.verification_conflict?`<div class="sub">${esc(r.verification_conflict)}</div>`:''}`;
   const search=r.price_search==null?'<span class="muted">—</span>':`<div>${esc(money(r.price_search))}</div>`+(r.asking?'':`<div class="sub">${esc(r.price_display||'Not on the public price')}</div>`);
   const change=r.direction&&r.change_amount!=null?`<span class="${r.direction==='down'?'chg-down':'chg-up'}">${r.direction==='down'?'↓':'↑'} ${esc(money(Math.abs(r.change_amount)))}</span>`:'<span class="muted">—</span>';
   return `<tr><td><input class="check rowpick" type="checkbox" data-url="${esc(r.url)}"${on} aria-label="Select ${esc(r.street)}"></td>`+
    `<td class="addr"><button type="button" class="linkish" data-url="${esc(r.url)}">${esc(r.street)}</button></td><td>${esc(r.suburb)}</td><td>${esc(agents(r))}</td><td>${esc(r.office_name)}</td>`+
    `<td class="n">${r.days==null?'':r.days}</td><td>${esc(r.price_display)}</td><td class="n">${esc(money(r.asking))}</td><td>${search}</td><td class="n">${change}</td><td class="n">${esc(money(r.avm))}</td>`+
-   `<td class="n">${gap}</td><td><span class="pill ${pill}">${esc(r.status)}</span></td><td class="reason">${esc(r.reason)}</td><td>${link}</td></tr>`}).join('');
+   `<td class="n">${gap}</td><td><span class="pill ${pill}">${esc(r.status)}</span></td><td>${check}</td><td class="reason">${esc(r.reason)}</td><td>${link}</td></tr>`}).join('');
  $('#tbl').innerHTML=head+body;
  const all=$('#all');if(all){all.checked=rows.length>0&&rows.every(r=>selected.has(r.url));all.onchange=()=>{rows.forEach(r=>{if(all.checked)selected.add(r.url);else selected.delete(r.url)});renderTable()}}
  document.querySelectorAll('.rowpick').forEach(box=>box.onchange=()=>{if(box.checked)selected.add(box.dataset.url);else selected.delete(box.dataset.url);$('#picked').textContent=selected.size?selected.size+' selected':'';const a=$('#all');if(a)a.checked=rows.length>0&&rows.every(r=>selected.has(r.url))});
@@ -119,10 +137,17 @@ async function toggleHistory(btn){const tr=btn.closest('tr');const next=tr.nextE
  try{const data=await api('/api/admin/opportunities/history?url='+encodeURIComponent(btn.dataset.url));
   const events=data.events||[];const body=events.map(e=>`<tr><td>${esc(e.changed_on)}</td><td>${e.field==='price_search'?'Search price':'Asking'}</td><td class="n">${esc(money(e.old_value))}</td><td class="n">${esc(money(e.new_value))}</td></tr>`).join('');
   const summary=data.summary&&data.summary.changes?`${data.summary.changes} change${data.summary.changes===1?'':'s'}`:'No change yet. The first price is kept until a later snapshot differs.';
-  tr.insertAdjacentHTML('afterend',`<tr class="hist"><td colspan="15"><div class="hint"><b>Price history · ${esc(data.street||'')}</b> · ${esc(summary)}${body?`<div class="scroll"><table><tr><th>Date</th><th>Field</th><th class="n">From</th><th class="n">To</th></tr>${body}</table></div>`:''}</div></td></tr>`);
+  tr.insertAdjacentHTML('afterend',`<tr class="hist"><td colspan="16"><div class="hint"><b>Price history · ${esc(data.street||'')}</b> · ${esc(summary)}${body?`<div class="scroll"><table><tr><th>Date</th><th>Field</th><th class="n">From</th><th class="n">To</th></tr>${body}</table></div>`:''}</div></td></tr>`);
  }catch(e){$('#runErr').textContent=e.message}}
 async function load(){D=await api('/api/admin/opportunities?'+query());fill($('#fSuburb'),D.suburbs,'All suburbs');fill($('#fDistrict'),D.districts,'All districts');fill($('#fCategory'),D.categories,'All categories');
- renderRun(D.run);renderCards();renderTable();const running=!!(D.run&&D.run.running);if(running&&!poll)poll=setInterval(refreshStatus,3000);if(!running&&poll){clearInterval(poll);poll=null}wasRunning=running}
+ renderRun(D.run);renderCards();renderTable();refreshVerify();const running=!!(D.run&&D.run.running);if(running&&!poll)poll=setInterval(refreshStatus,3000);if(!running&&poll){clearInterval(poll);poll=null}wasRunning=running}
+async function refreshVerify(){try{const s=await api('/api/admin/opportunities/verification/status');const run=s.run||{};const bits=[];
+ if(s.crawl_active)bits.push('OneRoof crawl still running, so this check will wait');
+ if(!s.latest_full_crawl)bits.push('No completed full crawl yet');else bits.push('Latest full crawl '+when(s.latest_full_crawl.finished_at));
+ if(run.status&&run.status!=='never')bits.push((run.running?'Check running':run.status)+(run.message?' — '+run.message:''));
+ $('#verifyBox').className=s.crawl_active||run.status==='error'?'banner':'hint';$('#verifyBox').textContent=bits.join(' · ')||'No agency check yet';
+ $('#verifyBtn').disabled=!!(run.running||s.crawl_active)}catch(e){}}
+async function runVerify(){try{await api('/api/admin/opportunities/verification/run',{body:{}});refreshVerify();setTimeout(refreshVerify,3000)}catch(e){$('#verifyBox').className='banner';$('#verifyBox').textContent=e.message}}
 async function refreshStatus(){try{const run=await api('/api/admin/opportunities/status');renderRun(run);if(wasRunning&&!run.running){wasRunning=false;if(poll){clearInterval(poll);poll=null}await load()}else wasRunning=!!run.running}catch(e){$('#runErr').textContent=e.message}}
 function setType(type){const sel=$('#fType');sel.value=sel.value===type?'':type;load()}
 async function runNow(){$('#runErr').textContent='';try{await api('/api/admin/opportunities/run',{body:{}});await refreshStatus();if(!poll)poll=setInterval(refreshStatus,3000)}catch(e){$('#runErr').textContent=e.message}}
@@ -134,6 +159,6 @@ async function exportCsv(){const visible=(D&&D.rows||[]).map(r=>r.url);const pic
  const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='opportunities.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 async function uploadSales(){$('#saleErr').textContent='';$('#saleOk').textContent='';const file=$('#csvFile').files[0];if(!file){$('#saleErr').textContent='Choose a CSV file first';return}
  try{const csv=await file.text();const res=await api('/api/admin/opportunities/sales',{body:{csv}});$('#saleOk').textContent=`Stored ${res.inserted} sale row${res.inserted===1?'':'s'}. ${res.sold} listing${res.sold===1?'':'s'} marked sold.`;$('#csvFile').value='';await load()}catch(e){$('#saleErr').textContent=e.message}}
-['fSuburb','fDistrict','fType','fCategory','fMin','fMax'].forEach(id=>{const el=$('#'+id);el.addEventListener('change',()=>{selected.clear();load()});});
+['fSuburb','fDistrict','fType','fCategory','fVerify','fMin','fMax'].forEach(id=>{const el=$('#'+id);el.addEventListener('change',()=>{selected.clear();load()});});
 load();
 </script></body></html>
