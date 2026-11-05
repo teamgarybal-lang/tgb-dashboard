@@ -974,6 +974,13 @@ app.get('/api/admin/opportunities', requireAdmin, (req, res) => {
   data.run = opportunityRuns.status();
   res.json(data);
 });
+app.get('/api/admin/opportunities/history', requireAdmin, (req, res) => {
+  const url = String(req.query.url || '');
+  if (!url) return res.status(400).json({ error: 'Missing listing' });
+  const history = opportunities.priceHistory(db, url);
+  if (!history) return res.status(404).json({ error: 'Listing not found' });
+  res.json(history);
+});
 app.get('/api/admin/opportunities/status', requireAdmin, (req, res) => {
   res.json(opportunityRuns.status());
 });
