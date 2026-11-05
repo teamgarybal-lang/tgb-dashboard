@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const listings = require('./listings');
+const opportunities = require('./opportunities');
 
 const PORT = process.env.PORT || 3100;
 const TZ = 'Pacific/Auckland';
@@ -86,6 +87,9 @@ CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidde
   // Listings are entered by hand. Drop rows that were only copied from the old website fetch.
   db.prepare("DELETE FROM board_listings WHERE origin='feed' AND COALESCE(admin_edited,0)=0").run();
 }
+opportunities.migrate(db);
+const opportunityRuns = opportunities.createRunner({ db, log: (...parts) => console.log(...parts) });
+if (process.env.OPPORTUNITIES_SCHEDULER !== '0') opportunityRuns.schedule();
 
 // Entry order on every screen. Score = appr_done*5 + appr_booked*3 + cold_calls*0 + door_knocks*0 + letter_drops*0.
 const METRICS = ['appr_done', 'appr_booked', 'cold_calls', 'door_knocks', 'letter_drops'];
@@ -399,7 +403,12 @@ function enteredMetrics(r) { return METRICS.some(m => (r[m] || 0) > 0); }
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
-app.use(express.json({ limit: '50kb' }));
+const jsonSmall = express.json({ limit: '50kb' });
+const jsonLarge = express.json({ limit: '8mb' });
+app.use((req, res, next) => {
+  if (req.path === '/api/admin/opportunities/sales' || req.path === '/api/admin/opportunities/export.csv') return jsonLarge(req, res, next);
+  return jsonSmall(req, res, next);
+});
 app.use(cookieParser());
 app.use((req, res, next) => { res.set('X-Content-Type-Options', 'nosniff'); res.set('Referrer-Policy', 'no-referrer'); next(); });
 
@@ -951,6 +960,41 @@ app.post('/api/board/items/:id', requireAdmin, (req, res) => {
     v.status, v.name, v.address, v.suburb, v.agent, v.agent2, v.cv, v.method, v.asking_price, v.sale_price, v.condition_text, v.cond_price, v.listed_on, v.hidden, id);
   res.json({ ok: true });
 });
+app.get('/api/admin/opportunities', requireAdmin, (req, res) => {
+  const data = opportunities.queryOpportunities(db, {
+    suburb: req.query.suburb || '',
+    district: req.query.district || '',
+    category: req.query.category || '',
+    type: req.query.type || '',
+    min_days: req.query.min_days,
+    max_days: req.query.max_days,
+    sort: req.query.sort || 'days',
+    dir: req.query.dir || 'desc',
+  });
+  data.run = opportunityRuns.status();
+  res.json(data);
+});
+app.get('/api/admin/opportunities/status', requireAdmin, (req, res) => {
+  res.json(opportunityRuns.status());
+});
+app.post('/api/admin/opportunities/run', requireAdmin, (req, res) => {
+  const job = opportunityRuns.start('manual');
+  if (!job.started) return res.status(409).json({ error: 'A collection is already running', run: opportunityRuns.status() });
+  res.status(202).json({ ok: true, run: opportunityRuns.status() });
+});
+app.post('/api/admin/opportunities/sales', requireAdmin, (req, res) => {
+  const csv = req.body && typeof req.body.csv === 'string' ? req.body.csv : '';
+  if (!csv.trim()) return res.status(400).json({ error: 'Choose a REINZ CSV file first' });
+  const result = opportunities.importReinzCsv(db, csv);
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json(result);
+});
+app.post('/api/admin/opportunities/export.csv', requireAdmin, (req, res) => {
+  const rows = opportunities.rowsForExport(db, req.body || {});
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename="opportunities.csv"');
+  res.send(opportunities.toCsv(rows));
+});
 app.post('/api/board/items/:id/delete', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   const r = db.prepare('DELETE FROM board_listings WHERE id=?').run(id);
@@ -974,6 +1018,19 @@ app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));
 app.get('/admin', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); if (u.role !== 'admin') return res.redirect('/me'); page('admin.html')(req, res); });
+app.get('/opportunities', (req, res) => {
+  const u = auth(req);
+  if (!u) return res.redirect('/login?next=' + encodeURIComponent('/opportunities'));
+  if (u.role !== 'admin') {
+    return res.status(403).type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Opportunities · ${BRAND}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"></head>
+<body style="margin:0;min-height:100vh;background:#0B1F3A;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center">
+<div style="max-width:520px;padding:32px"><h1 style="font-weight:800">Harcourts <span style="color:#00ADEF;font-weight:300">TGB Group</span></h1>
+<p>Opportunities is only for admins.</p><p><a href="/me" style="color:#8FD9F8">Back to your numbers</a></p></div></body></html>`);
+  }
+  res.set('Cache-Control', 'no-store');
+  return page('opportunities.html')(req, res);
+});
 function boardDenied() {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Listings board · ${BRAND}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"></head>

@@ -1,0 +1,366 @@
+[
+  {
+    "slug": "suburb_mangere-manukau-city-1004",
+    "totals": 134,
+    "status": 200,
+    "title": "Houses for sale in M\u0101ngere, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_mangere-bridge-manukau-city-273",
+    "totals": 116,
+    "status": 200,
+    "title": "Houses for sale in M\u0101ngere Bridge, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_mangere-east-manukau-city-2242",
+    "totals": 180,
+    "status": 200,
+    "title": "Houses for sale in M\u0101ngere East, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_favona-manukau-city-2360",
+    "totals": 34,
+    "status": 200,
+    "title": "Houses for sale in Favona, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_auckland-airport-manukau-city-2149",
+    "totals": 0,
+    "status": 200,
+    "title": "Houses for sale in Auckland Airport, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_otahuhu-auckland-city-3836",
+    "totals": 120,
+    "status": 200,
+    "title": "Houses for sale in \u014ct\u0101huhu, Auckland City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_papatoetoe-manukau-city-2795",
+    "totals": 464,
+    "status": 200,
+    "title": "Houses for sale in Papatoetoe, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_middlemore-hospital-manukau-city-1027",
+    "totals": 0,
+    "status": 200,
+    "title": "Houses for sale in Middlemore Hospital, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_otara-manukau-city-2136",
+    "totals": 45,
+    "status": 200,
+    "title": "Houses for sale in \u014ctara, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_east-tamaki-manukau-city-2245",
+    "totals": 38,
+    "status": 200,
+    "title": "Houses for sale in East T\u0101maki, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_east-tamaki-heights-manukau-city-938",
+    "totals": 22,
+    "status": 200,
+    "title": "Houses for sale in East T\u0101maki Heights, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_clover-park-manukau-city-1673",
+    "totals": 17,
+    "status": 200,
+    "title": "Houses for sale in Clover Park, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_flat-bush-manukau-city-69",
+    "totals": 397,
+    "status": 200,
+    "title": "Houses for sale in Flat Bush, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_goodwood-heights-manukau-city-606",
+    "totals": 14,
+    "status": 200,
+    "title": "Houses for sale in Goodwood Heights, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_totara-heights-manukau-city-1289",
+    "totals": 10,
+    "status": 200,
+    "title": "Houses for sale in Totara Heights, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_totara-park-manukau-city-206",
+    "totals": 24,
+    "status": 200,
+    "title": "Houses for sale in T\u014dtara Park, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_manukau-heights-manukau-city-4244",
+    "totals": 0,
+    "status": 200,
+    "title": "Houses for sale in Manukau Heights, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_manukau-manukau-city-1253",
+    "totals": 62,
+    "status": 200,
+    "title": "Houses for sale in Manukau, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_wiri-manukau-city-2573",
+    "totals": 17,
+    "status": 200,
+    "title": "Houses for sale in Wiri, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_manurewa-manukau-city-679",
+    "totals": 439,
+    "status": 200,
+    "title": "Houses for sale in Manurewa, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_manurewa-east-manukau-city-2394",
+    "totals": 52,
+    "status": 200,
+    "title": "Houses for sale in Manurewa East, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_hillpark-manukau-city-4287",
+    "totals": 72,
+    "status": 200,
+    "title": "Houses for sale in Hillpark, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_the-gardens-manukau-city-3226",
+    "totals": 25,
+    "status": 200,
+    "title": "Houses for sale in The Gardens, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_randwick-park-manukau-city-763",
+    "totals": 19,
+    "status": 200,
+    "title": "Houses for sale in Randwick Park, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_clendon-park-manukau-city-291",
+    "totals": 37,
+    "status": 200,
+    "title": "Houses for sale in Clendon Park, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_weymouth-manukau-city-2780",
+    "totals": 71,
+    "status": 200,
+    "title": "Houses for sale in Weymouth, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_wattle-downs-manukau-city-2323",
+    "totals": 46,
+    "status": 200,
+    "title": "Houses for sale in Wattle Downs, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_alfriston-manukau-city-2607",
+    "totals": 9,
+    "status": 200,
+    "title": "Houses for sale in Alfriston, Manukau City",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_papakura-papakura-2014",
+    "totals": 406,
+    "status": 200,
+    "title": "Houses for sale in Papakura, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_takanini-papakura-2919",
+    "totals": 126,
+    "status": 200,
+    "title": "Houses for sale in Takanini, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_red-hill-papakura-256",
+    "totals": 9,
+    "status": 200,
+    "title": "Houses for sale in Red Hill, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_rosehill-papakura-913",
+    "totals": 33,
+    "status": 200,
+    "title": "Houses for sale in Rosehill, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_pahurehure-papakura-1590",
+    "totals": 14,
+    "status": 200,
+    "title": "Houses for sale in Pahurehure, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_opaheke-papakura-1647",
+    "totals": 138,
+    "status": 200,
+    "title": "Houses for sale in \u014cpaheke, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_conifer-grove-papakura-3033",
+    "totals": 42,
+    "status": 200,
+    "title": "Houses for sale in Conifer Grove, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_hingaia-papakura-4325",
+    "totals": 2,
+    "status": 200,
+    "title": "Houses for sale in Hingaia, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_drury-papakura-1665",
+    "totals": 134,
+    "status": 200,
+    "title": "Houses for sale in Drury, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_ardmore-papakura-1025",
+    "totals": 7,
+    "status": 200,
+    "title": "Houses for sale in Ardmore, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_runciman-papakura-1161",
+    "totals": 1,
+    "status": 200,
+    "title": "Houses for sale in Runciman, Papakura",
+    "group": "core"
+  },
+  {
+    "slug": "suburb_botany-downs-manukau-city-2810",
+    "totals": 71,
+    "status": 200,
+    "title": "Houses for sale in Botany Downs, Manukau City",
+    "group": "botany"
+  },
+  {
+    "slug": "suburb_dannemora-manukau-city-726",
+    "totals": 8,
+    "status": 200,
+    "title": "Houses for sale in Dannemora, Manukau City",
+    "group": "botany"
+  },
+  {
+    "slug": "suburb_shamrock-park-manukau-city-2951",
+    "totals": 5,
+    "status": 200,
+    "title": "Houses for sale in Shamrock Park, Manukau City",
+    "group": "botany"
+  },
+  {
+    "slug": "suburb_huntington-park-manukau-city-464",
+    "totals": 2,
+    "status": 200,
+    "title": "Houses for sale in Huntington Park, Manukau City",
+    "group": "botany"
+  },
+  {
+    "slug": "suburb_mission-heights-manukau-city-4305",
+    "totals": 3,
+    "status": 200,
+    "title": "Houses for sale in Mission Heights, Manukau City",
+    "group": "botany"
+  },
+  {
+    "slug": "suburb_burswood-manukau-city-2773",
+    "totals": 2,
+    "status": 200,
+    "title": "Houses for sale in Burswood, Manukau City",
+    "group": "botany"
+  },
+  {
+    "slug": "suburb_pukekohe-franklin-1329",
+    "totals": 429,
+    "status": 200,
+    "title": "Houses for sale in Pukekohe, Franklin",
+    "group": "franklin"
+  },
+  {
+    "slug": "suburb_pukekohe-east-franklin-3045",
+    "totals": 12,
+    "status": 200,
+    "title": "Houses for sale in Pukekohe East, Franklin",
+    "group": "franklin"
+  },
+  {
+    "slug": "suburb_karaka-franklin-3227",
+    "totals": 584,
+    "status": 200,
+    "title": "Houses for sale in Karaka, Franklin",
+    "group": "franklin"
+  },
+  {
+    "slug": "suburb_paerata-franklin-1831",
+    "totals": 46,
+    "status": 200,
+    "title": "Houses for sale in Paerata, Franklin",
+    "group": "franklin"
+  },
+  {
+    "slug": "suburb_buckland-franklin-2180",
+    "totals": 6,
+    "status": 200,
+    "title": "Houses for sale in Buckland, Franklin",
+    "group": "franklin"
+  },
+  {
+    "slug": "suburb_puni-franklin-1472",
+    "totals": 2,
+    "status": 200,
+    "title": "Houses for sale in Puni, Franklin",
+    "group": "franklin"
+  },
+  {
+    "slug": "suburb_ramarama-franklin-1595",
+    "totals": 44,
+    "status": 200,
+    "title": "Houses for sale in Ramarama, Franklin",
+    "group": "franklin"
+  }
+]
