@@ -305,6 +305,7 @@ CREATE INDEX IF NOT EXISTS oneroof_price_history_listing ON oneroof_price_histor
   ensureColumn(db, 'oneroof_listings', 'price_search_fetched_at', 'TEXT');
   ensureColumn(db, 'oneroof_listings', 'price_text_at_fetch', 'TEXT');
   ensureColumn(db, 'oneroof_snapshots', 'price_search', 'INTEGER');
+  ensureColumn(db, 'oneroof_runs', 'full_complete', 'INTEGER NOT NULL DEFAULT 0');
   const now = aucklandIso(new Date());
   db.prepare(`UPDATE oneroof_runs SET status='interrupted', finished_at=?, message=? WHERE status='running'`)
     .run(now, 'Server restarted before the collection finished');
@@ -604,12 +605,15 @@ function saveSuburb(db, listings, opts) {
       );
       markSeen.run(rec.url);
     }
-    const disappeared = db.prepare(`UPDATE oneroof_listings
-      SET disappeared_at=@now, outcome=CASE WHEN outcome='sold' THEN outcome ELSE 'withdrawn' END
-      WHERE search_slug=@slug AND disappeared_at IS NULL AND url NOT IN (SELECT url FROM opp_seen)`).run({ now: nowIso, slug: searchSlug });
-    const missing = db.prepare('SELECT url, suburb FROM oneroof_listings WHERE search_slug=? AND disappeared_at=?').all(searchSlug, nowIso);
-    for (const row of missing) absent.run(row.url, snapDate, row.suburb);
-    return { saved: seen.size, disappeared: disappeared.changes };
+    let disappeared = 0;
+    if (opts.complete !== false) {
+      disappeared = db.prepare(`UPDATE oneroof_listings
+        SET disappeared_at=@now, outcome=CASE WHEN outcome='sold' THEN outcome ELSE 'withdrawn' END
+        WHERE search_slug=@slug AND disappeared_at IS NULL AND url NOT IN (SELECT url FROM opp_seen)`).run({ now: nowIso, slug: searchSlug }).changes;
+      const missing = db.prepare('SELECT url, suburb FROM oneroof_listings WHERE search_slug=? AND disappeared_at=?').all(searchSlug, nowIso);
+      for (const row of missing) absent.run(row.url, snapDate, row.suburb);
+    }
+    return { saved: seen.size, disappeared };
   });
   const saved = tx();
   matchSales(db);
@@ -954,6 +958,13 @@ const CSV_COLUMNS = [
   ['reason', 'reason'],
   ['sale_price', 'sale_price'],
   ['sale_date', 'sale_date'],
+  ['verification', 'verification'],
+  ['evidence_excerpt', 'evidence_excerpt'],
+  ['evidence_url', 'evidence_url'],
+  ['evidence_checked_at', 'evidence_checked_at'],
+  ['matched_address', 'matched_address'],
+  ['matched_listing_id', 'matched_listing_id'],
+  ['verification_conflict', 'verification_conflict'],
   ['url', 'url'],
 ];
 
@@ -1256,13 +1267,24 @@ async function collectSuburb(db, suburb, ctx) {
     if (totals != null && seen.length >= totals) break;
     if (parsed.listings.length < PAGE_SIZE) break;
   }
+  // A short or blocked page set is not evidence that the missing homes left the market.
+  const complete = totals === 0 || (totals != null && seen.length >= totals);
   const saved = saveSuburb(db, seen, {
     searchSlug: suburb.slug,
     nowIso: ctx.nowIso,
     snapDate: ctx.snapDate,
     now: ctx.now,
+    complete,
   });
-  return { stopped: false, pages, listings: saved.saved, disappeared: saved.disappeared, totals };
+  return {
+    stopped: false,
+    incomplete: !complete,
+    pages,
+    listings: saved.saved,
+    disappeared: saved.disappeared,
+    totals,
+    message: complete ? null : `Incomplete ${suburb.suburb}: saw ${seen.length} of ${totals == null ? 'an unknown total' : totals}. No listings were marked disappeared.`,
+  };
 }
 
 function createRunner(opts) {
@@ -1303,14 +1325,16 @@ function createRunner(opts) {
       (started_at, status, trigger, suburbs_total, message)
       VALUES (?, 'running', ?, ?, ?)`).run(nowIso, trigger, suburbList.length, 'Starting');
     const id = Number(info.lastInsertRowid);
-    const progress = { done: 0, pages: 0, seen: 0, disappeared: 0 };
+    const progress = { done: 0, pages: 0, seen: 0, disappeared: 0, incomplete: 0 };
     const update = (message) => {
       db.prepare(`UPDATE oneroof_runs SET suburbs_done=?, pages_fetched=?, listings_seen=?, disappeared=?, message=? WHERE id=?`)
         .run(progress.done, progress.pages, progress.seen, progress.disappeared, message, id);
     };
     const finish = (statusName, message) => {
-      db.prepare(`UPDATE oneroof_runs SET status=?, finished_at=?, suburbs_done=?, pages_fetched=?, listings_seen=?, disappeared=?, message=? WHERE id=?`)
-        .run(statusName, aucklandIso(new Date()), progress.done, progress.pages, progress.seen, progress.disappeared, message, id);
+      const canonical = loadSuburbs().length;
+      const full = statusName === 'ok' && progress.incomplete === 0 && progress.done === suburbList.length && suburbList.length === canonical ? 1 : 0;
+      db.prepare(`UPDATE oneroof_runs SET status=?, finished_at=?, suburbs_done=?, pages_fetched=?, listings_seen=?, disappeared=?, message=?, full_complete=? WHERE id=?`)
+        .run(statusName, aucklandIso(new Date()), progress.done, progress.pages, progress.seen, progress.disappeared, message, full, id);
       log(`[opportunities] ${statusName}: ${message}`);
       return {
         status: statusName,
@@ -1354,6 +1378,10 @@ function createRunner(opts) {
         progress.pages += result.pages;
         progress.seen += result.listings;
         progress.disappeared += result.disappeared || 0;
+        if (result.incomplete) {
+          progress.incomplete++;
+          log(`[opportunities] ${result.message}`);
+        }
         if (result.stopped) return finish('blocked', result.message);
         progress.done++;
         update(`${suburb.suburb} saved (${progress.done}/${suburbList.length})`);
@@ -1364,7 +1392,10 @@ function createRunner(opts) {
       const priceNote = detail.total
         ? `Search prices updated for ${detail.done} of ${detail.total} listings.`
         : 'Search prices already up to date.';
-      return finish('ok', `Saved ${progress.seen} listings across ${progress.done} ${suburbWord}. ${progress.disappeared} disappeared. ${priceNote}`);
+      const incompleteNote = progress.incomplete
+        ? ` ${progress.incomplete} suburb ${progress.incomplete === 1 ? 'crawl was' : 'crawls were'} incomplete, so those missing homes were not marked disappeared.`
+        : '';
+      return finish('ok', `Saved ${progress.seen} listings across ${progress.done} ${suburbWord}. ${progress.disappeared} disappeared. ${priceNote}${incompleteNote}`);
     } catch (err) {
       const message = err && err.message ? err.message : 'Collection failed';
       log(`[opportunities] error ${message}`);

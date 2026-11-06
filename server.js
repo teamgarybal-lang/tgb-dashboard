@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const listings = require('./listings');
 const opportunities = require('./opportunities');
+const verification = require('./verification');
 
 const PORT = process.env.PORT || 3100;
 const TZ = 'Pacific/Auckland';
@@ -88,8 +89,14 @@ CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidde
   db.prepare("DELETE FROM board_listings WHERE origin='feed' AND COALESCE(admin_edited,0)=0").run();
 }
 opportunities.migrate(db);
+verification.migrate(db);
 const opportunityRuns = opportunities.createRunner({ db, log: (...parts) => console.log(...parts) });
 if (process.env.OPPORTUNITIES_SCHEDULER !== '0') opportunityRuns.schedule();
+const verificationChecks = verification.createChecker({
+  db,
+  log: (...parts) => console.log(...parts),
+  baselineRunning: () => opportunityRuns.status().running,
+});
 
 // Entry order on every screen. Score = appr_done*5 + appr_booked*3 + cold_calls*0 + door_knocks*0 + letter_drops*0.
 const METRICS = ['appr_done', 'appr_booked', 'cold_calls', 'door_knocks', 'letter_drops'];
@@ -972,7 +979,57 @@ app.get('/api/admin/opportunities', requireAdmin, (req, res) => {
     dir: req.query.dir || 'desc',
   });
   data.run = opportunityRuns.status();
+  verification.decorate(db, data.rows);
+  if (req.query.verification) {
+    data.rows = data.rows.filter(row => row.verification === req.query.verification);
+    data.shown = data.rows.length;
+  }
   res.json(data);
+});
+app.get('/api/admin/opportunities/verification/status', requireAdmin, (req, res) => {
+  const body = verificationChecks.status();
+  body.crawl_active = body.crawl_active || opportunityRuns.status().running;
+  res.json(body);
+});
+app.post('/api/admin/opportunities/verification/run', requireAdmin, (req, res) => {
+  const trigger = req.body && req.body.trigger === 'routine' ? 'routine' : 'manual';
+  const job = verificationChecks.start(trigger);
+  if (job.deferred) {
+    return res.status(409).json({
+      error: 'The OneRoof crawl is still running. This check waits until that crawl has finished.',
+      deferred: true,
+      crawl_active: true,
+    });
+  }
+  if (job.noBaseline) {
+    return res.status(409).json({
+      error: 'No completed full South Auckland crawl yet.',
+      no_baseline: true,
+    });
+  }
+  if (!job.started) return res.status(409).json({ error: 'A verification check is already running', run: verificationChecks.status().run });
+  res.status(202).json({ ok: true, run: verificationChecks.status().run });
+});
+app.get('/api/admin/opportunities/verification/report', requireAdmin, (req, res) => {
+  res.json({
+    crawl: verification.latestFullCrawl(db),
+    rows: verification.reportRows(db, { category: req.query.category || '', suburb: req.query.suburb || '' }),
+  });
+});
+app.get('/api/admin/opportunities/verification/report.csv', requireAdmin, (req, res) => {
+  const rows = verification.reportRows(db, { category: req.query.category || '', suburb: req.query.suburb || '' });
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename="withdrawn-checks.csv"');
+  res.send(verification.reportCsv(rows));
+});
+app.post('/api/admin/opportunities/verification/evidence', requireAdmin, async (req, res) => {
+  try {
+    const result = await verification.submitEvidence(db, req.body || {});
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: 'Evidence could not be saved' });
+  }
 });
 app.get('/api/admin/opportunities/history', requireAdmin, (req, res) => {
   const url = String(req.query.url || '');
@@ -998,6 +1055,7 @@ app.post('/api/admin/opportunities/sales', requireAdmin, (req, res) => {
 });
 app.post('/api/admin/opportunities/export.csv', requireAdmin, (req, res) => {
   const rows = opportunities.rowsForExport(db, req.body || {});
+  verification.decorate(db, rows);
   res.set('Content-Type', 'text/csv; charset=utf-8');
   res.set('Content-Disposition', 'attachment; filename="opportunities.csv"');
   res.send(opportunities.toCsv(rows));
