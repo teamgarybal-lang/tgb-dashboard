@@ -9,6 +9,7 @@ const fs = require('fs');
 const listings = require('./listings');
 const opportunities = require('./opportunities');
 const verification = require('./verification');
+const access = require('./access');
 
 const PORT = process.env.PORT || 3100;
 const TZ = 'Pacific/Auckland';
@@ -90,6 +91,7 @@ CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidde
 }
 opportunities.migrate(db);
 verification.migrate(db);
+access.migrate(db);
 const opportunityRuns = opportunities.createRunner({ db, log: (...parts) => console.log(...parts) });
 if (process.env.OPPORTUNITIES_SCHEDULER !== '0') opportunityRuns.schedule();
 const verificationChecks = verification.createChecker({
@@ -430,6 +432,10 @@ function auth(req) {
 }
 const requireUser = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); req.user = u; next(); };
 const requireAdmin = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); if (u.role !== 'admin') return res.status(403).json({ error: 'Admin only' }); req.user = u; next(); };
+app.use((req, res, next) => {
+  try { access.observeRequest(db, req, res, auth); } catch (err) { /* a tracking failure must not block the dashboard */ }
+  next();
+});
 // Basic CSRF guard: state-changing API calls must be JSON (forms from other sites can't send that cross-origin without CORS)
 app.use('/api', (req, res, next) => { if (req.method === 'POST' && !req.is('application/json')) return res.status(415).json({ error: 'JSON required' }); next(); });
 
@@ -444,6 +450,7 @@ app.post('/api/login', (req, res) => {
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(token, u.id, now + SESSION_DAYS * 864e5);
   res.cookie('sid', token, { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: SESSION_DAYS * 864e5, path: '/' });
+  try { access.record(db, u.id, 'sign_in', 'login'); } catch (err) { /* sign-in still succeeds if the access log cannot be written */ }
   res.json({ ok: true, role: u.role, must_change: !!u.must_change });
 });
 app.post('/api/logout', (req, res) => { if (req.cookies.sid) db.prepare('DELETE FROM sessions WHERE token=?').run(req.cookies.sid); res.clearCookie('sid', { path: '/' }); res.json({ ok: true }); });
@@ -986,6 +993,18 @@ app.get('/api/admin/opportunities', requireAdmin, (req, res) => {
   }
   res.json(data);
 });
+app.get('/api/admin/access', requireAdmin, (req, res) => {
+  const data = access.report(db, { week: req.query.week || 'current' });
+  if (data.error) return res.status(400).json({ error: data.error });
+  res.json(data);
+});
+app.get('/api/admin/access.csv', requireAdmin, (req, res) => {
+  const data = access.report(db, { week: req.query.week || 'current' });
+  if (data.error) return res.status(400).json({ error: data.error });
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename="access.csv"');
+  res.send(access.reportCsv(data));
+});
 app.get('/api/admin/opportunities/verification/status', requireAdmin, (req, res) => {
   const body = verificationChecks.status();
   body.crawl_active = body.crawl_active || opportunityRuns.status().running;
@@ -1083,6 +1102,13 @@ app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));
 app.get('/admin', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); if (u.role !== 'admin') return res.redirect('/me'); page('admin.html')(req, res); });
+app.get('/access', (req, res) => {
+  const u = auth(req);
+  if (!u) return res.redirect('/login?next=' + encodeURIComponent('/access'));
+  if (u.role !== 'admin') return res.redirect('/me');
+  res.set('Cache-Control', 'no-store');
+  return page('access.html')(req, res);
+});
 app.get('/opportunities', (req, res) => {
   const u = auth(req);
   if (!u) return res.redirect('/login?next=' + encodeURIComponent('/opportunities'));
