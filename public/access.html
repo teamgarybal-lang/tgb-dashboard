@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Access · Harcourts TGB Group</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<header class="top"><img src="/static/logo.png" alt="Harcourts TGB Group"><div class="who"><b>Access</b><br><a href="/admin">Team numbers</a> · <a href="/opportunities">Opportunities</a> · <a href="#" onclick="logout();return false">Sign out</a></div></header>
+<div class="wrap wide">
+ <div class="card">
+  <div class="row" style="justify-content:space-between">
+   <h2 style="margin:0">Who opened the dashboard</h2>
+   <div class="row">
+    <select id="week" style="width:auto"><option value="current">This week</option><option value="previous">Last week</option></select>
+    <a class="btn sec" id="csv" href="/api/admin/access.csv?week=current">CSV</a>
+   </div>
+  </div>
+  <p class="muted" id="note"></p>
+  <div id="counts" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))"></div>
+ </div>
+ <div class="card">
+  <h2>Enabled agents</h2>
+  <p class="muted">Accessed means a successful sign-in, or opening a signed-in page, or saving a number or address. The automatic refresh while a page is left open does not count. Days before tracking began are unknown.</p>
+  <div class="scroll"><table id="agents"></table></div>
+ </div>
+ <div class="card">
+  <h2>Admins</h2>
+  <p class="muted">Shown separately from the agent list.</p>
+  <div class="scroll"><table id="admins"></table></div>
+ </div>
+ <div class="card" id="anomalyCard">
+  <h2>Roster notes</h2>
+  <div id="anomalies" class="muted"></div>
+ </div>
+</div>
+<script src="/static/common.js"></script>
+<script>
+const when=iso=>{if(!iso)return '—';const d=new Date(iso);if(Number.isNaN(d.getTime()))return '—';return d.toLocaleString('en-NZ',{timeZone:'Pacific/Auckland',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})};
+function row(people){if(!people.length)return '<tr><td class="muted">None</td></tr>';
+ return '<tr><th>Name</th><th>This week</th><th>Last sign-in</th><th>Last visit</th><th class="n">Sign-ins</th><th class="n">Visits</th></tr>'+
+ people.map(p=>`<tr><td><b>${esc(p.name)}</b><div class="muted">${esc(p.email)}</div></td><td>${esc(p.status_label)}</td><td>${esc(when(p.last_sign_in))}</td><td>${esc(when(p.last_visit))}</td><td class="n">${p.sign_ins}</td><td class="n">${p.visits}</td></tr>`).join('')}
+async function load(){const week=$('#week').value;const d=await api('/api/admin/access?week='+encodeURIComponent(week));
+ $('#csv').href='/api/admin/access.csv?week='+encodeURIComponent(week);
+ const range=d.week_start+' – '+(d.coverage==='unknown'?d.week_end:d.cutoff);
+ $('#note').textContent=`${range} · Auckland weeks run Monday to Sunday. ${d.note}`;
+ const c=d.counts||{};
+ $('#counts').innerHTML=[['Enabled agents',c.enabled_agents],['Accessed this week',c.accessed_this_week],['Not observed since tracking began',c.not_observed_since_start],['Unknown history',c.unknown_history]].map(([k,v])=>`<div class="stat"><span>${esc(k)}</span><b>${v||0}</b></div>`).join('');
+ $('#agents').innerHTML=row(d.agents||[]);
+ $('#admins').innerHTML=row(d.admins||[]);
+ const odd=d.anomalies||[];
+ $('#anomalies').innerHTML=odd.length?odd.map(a=>`${esc(a.name)} · ${esc(a.email)} · ${a.active?'active':'inactive'} · ${esc(a.reason==='inactive'?'inactive, left out of the agent list':'role is not an enabled agent')}`).join('<br>'):'No inactive agents or unexpected roles.'}
+$('#week').onchange=load;
+load();
+</script></body></html>
