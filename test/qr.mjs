@@ -11,6 +11,8 @@ const Database = require('better-sqlite3');
 const qr = require(path.join(process.cwd(), 'qr.js'));
 
 const BODY = 'Hi Jovana, I\'d like a free appraisal of my property.\nName: \nProperty address: \nEmail: ';
+const ISAIAH_BODY = 'Hi Isaiah, I\'d like a free appraisal of my property.\nName: \nProperty address: \nEmail: ';
+const AMAN_BODY = 'Hi Aman, I\'d like a free appraisal of my property.\nName: \nProperty address: \nEmail: ';
 
 test('sms links differ for iPhone and Android, and previews are bots', () => {
   assert.equal(qr.smsUri('+64226393317', 'Hi\nName: ', 'ios'), 'sms:+64226393317&body=Hi%0AName%3A%20');
@@ -168,6 +170,102 @@ test('a scan is counted and opens the text, bots and dead links are not, and the
     assert.match(adminPage.text, /Gary &amp; Jovana appraisal letter|Letter QR/);
     assert.equal(app.logs().includes(ip), false);
     assert.equal(app.logs().includes(pw), false);
+  } finally {
+    await app.stop();
+  }
+});
+
+test('letter seeds insert only when the code is missing and leave rows and scans alone', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'tgb-qr-seed-'));
+  const db = new Database(path.join(data, 'seed.db'));
+  qr.migrate(db);
+
+  const expectRow = (code, label, agent, mobile, body) => {
+    const row = db.prepare('SELECT label, campaign, suburb, agent_name, agent_mobile, sms_body, active FROM qr_links WHERE code=?').get(code);
+    assert.deepEqual(row, {
+      label,
+      campaign: 'appraisal-letters',
+      suburb: '',
+      agent_name: agent,
+      agent_mobile: mobile,
+      sms_body: body,
+      active: 1,
+    });
+  };
+  expectRow('k7m3qp', 'Gary & Jovana appraisal letter', 'Jovana Giudici', '+64226393317', BODY);
+  expectRow('i5s8hq', 'Gary & Isaiah appraisal letter', 'Isaiah', '+64211633662', ISAIAH_BODY);
+  expectRow('a2m6nx', 'Aman appraisal letter', 'Aman', '+64211271154', AMAN_BODY);
+  assert.equal(qr.LETTER_SEEDS.map(seed => seed.code).join(','), 'i5s8hq,a2m6nx');
+
+  const isaiah = db.prepare('SELECT id, created_at FROM qr_links WHERE code=?').get('i5s8hq');
+  const jovana = db.prepare('SELECT id, label, agent_name, agent_mobile, sms_body, created_at FROM qr_links WHERE code=?').get('k7m3qp');
+  db.prepare('UPDATE qr_links SET label=?, agent_mobile=?, sms_body=? WHERE code=?').run('Edited Isaiah letter', '+64210000001', 'Do not replace', 'i5s8hq');
+  db.prepare(`INSERT INTO qr_scans(link_id, scanned_at, device_type, visitor_hash, bot, counted) VALUES(?,?,?,?,?,?)`)
+    .run(isaiah.id, '2026-01-01T00:00:00.000Z', 'ios', 'abc', 0, 1);
+  db.prepare('DELETE FROM qr_links WHERE code=?').run('a2m6nx');
+
+  qr.migrate(db);
+
+  assert.deepEqual(db.prepare('SELECT label, agent_mobile, sms_body, created_at FROM qr_links WHERE code=?').get('i5s8hq'), {
+    label: 'Edited Isaiah letter',
+    agent_mobile: '+64210000001',
+    sms_body: 'Do not replace',
+    created_at: isaiah.created_at,
+  });
+  assert.deepEqual(db.prepare('SELECT visitor_hash, counted, device_type FROM qr_scans WHERE link_id=?').get(isaiah.id), {
+    visitor_hash: 'abc',
+    counted: 1,
+    device_type: 'ios',
+  });
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qr_scans').get().n, 1);
+  assert.deepEqual(db.prepare('SELECT id, label, agent_name, agent_mobile, sms_body, created_at FROM qr_links WHERE code=?').get('k7m3qp'), jovana);
+  expectRow('a2m6nx', 'Aman appraisal letter', 'Aman', '+64211271154', AMAN_BODY);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qr_links').get().n, 3);
+  db.close();
+});
+
+test('Isaiah and Aman letter codes open a text to the right number, and an unknown code stays on the fallback page', async () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'tgb-qr-letters-'));
+  const app = launch(data, 3272);
+  await app.ready();
+  try {
+    const iphone = { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)', 'X-Forwarded-For': '203.0.113.50' };
+    const href = (mobile, body, kind) => qr.smsUri(mobile, body, kind).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+
+    const isaiah = await hit(app.base, '/q/i5s8hq', { headers: iphone });
+    assert.equal(isaiah.status, 200);
+    assert.match(isaiah.text, /Text Isaiah/);
+    assert.ok(isaiah.text.includes(`href="${href('+64211633662', ISAIAH_BODY, 'ios')}"`));
+    assert.doesNotMatch(isaiah.text, /64211271154/);
+    assert.doesNotMatch(isaiah.text, /not available/);
+
+    const aman = await hit(app.base, '/q/a2m6nx', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel)', 'X-Forwarded-For': '203.0.113.51' },
+    });
+    assert.equal(aman.status, 200);
+    assert.match(aman.text, /Text Aman/);
+    assert.ok(aman.text.includes(`href="${href('+64211271154', AMAN_BODY, 'android')}"`));
+    assert.doesNotMatch(aman.text, /64211633662/);
+    assert.doesNotMatch(aman.text, /not available/);
+
+    const dead = await hit(app.base, '/q/nosuchcode', { headers: iphone });
+    assert.equal(dead.status, 200);
+    assert.match(dead.text, /not available/);
+    assert.match(dead.text, /022 639 3317/);
+    assert.doesNotMatch(dead.text, /sms:/);
+    assert.doesNotMatch(dead.text, /64211633662/);
+    assert.doesNotMatch(dead.text, /64211271154/);
+
+    const db = new Database(path.join(data, 'data.db'), { readonly: true });
+    const codes = db.prepare('SELECT code, agent_mobile FROM qr_links ORDER BY id').all();
+    assert.deepEqual(codes, [
+      { code: 'k7m3qp', agent_mobile: '+64226393317' },
+      { code: 'i5s8hq', agent_mobile: '+64211633662' },
+      { code: 'a2m6nx', agent_mobile: '+64211271154' },
+    ]);
+    db.close();
   } finally {
     await app.stop();
   }

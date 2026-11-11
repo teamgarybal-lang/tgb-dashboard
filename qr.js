@@ -10,6 +10,27 @@ const PUBLIC_ORIGIN = (process.env.PUBLIC_BASE_URL || 'https://tgb-dashboard.onr
 const OFFICE_PHONE = '+64226393317';
 const SEED_CODE = 'k7m3qp';
 const SEED_BODY = 'Hi Jovana, I\'d like a free appraisal of my property.\nName: \nProperty address: \nEmail: ';
+// Same text layout as SEED_BODY: one greeting line, then Name, Property address, and Email, each with a trailing space.
+const LETTER_SEEDS = [
+  {
+    code: 'i5s8hq',
+    label: 'Gary & Isaiah appraisal letter',
+    campaign: 'appraisal-letters',
+    suburb: '',
+    agent_name: 'Isaiah',
+    agent_mobile: '+64211633662',
+    sms_body: 'Hi Isaiah, I\'d like a free appraisal of my property.\nName: \nProperty address: \nEmail: ',
+  },
+  {
+    code: 'a2m6nx',
+    label: 'Aman appraisal letter',
+    campaign: 'appraisal-letters',
+    suburb: '',
+    agent_name: 'Aman',
+    agent_mobile: '+64211271154',
+    sms_body: 'Hi Aman, I\'d like a free appraisal of my property.\nName: \nProperty address: \nEmail: ',
+  },
+];
 const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 
 function migrate(db) {
@@ -53,6 +74,23 @@ CREATE INDEX IF NOT EXISTS qr_scans_link_time ON qr_scans(link_id, scanned_at);
       'Jovana Giudici',
       '+64226393317',
       SEED_BODY,
+      new Date().toISOString()
+    );
+  }
+  // Printed codes already on letters. Insert only when that code is missing.
+  const hasCode = db.prepare('SELECT 1 AS n FROM qr_links WHERE code=?');
+  const insertLetter = db.prepare(`INSERT INTO qr_links(code,label,campaign,suburb,agent_name,agent_mobile,sms_body,active,created_at)
+      VALUES(?,?,?,?,?,?,?,1,?)`);
+  for (const seed of LETTER_SEEDS) {
+    if (hasCode.get(seed.code)) continue;
+    insertLetter.run(
+      seed.code,
+      seed.label,
+      seed.campaign,
+      seed.suburb,
+      seed.agent_name,
+      seed.agent_mobile,
+      seed.sms_body,
       new Date().toISOString()
     );
   }
@@ -320,6 +358,7 @@ module.exports = {
   OFFICE_PHONE,
   SEED_CODE,
   SEED_BODY,
+  LETTER_SEEDS,
   migrate,
   trackingUrl,
   validMobile,
