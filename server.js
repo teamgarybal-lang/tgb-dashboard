@@ -10,6 +10,7 @@ const listings = require('./listings');
 const opportunities = require('./opportunities');
 const verification = require('./verification');
 const access = require('./access');
+const qr = require('./qr');
 
 const PORT = process.env.PORT || 3100;
 const TZ = 'Pacific/Auckland';
@@ -92,6 +93,7 @@ CREATE INDEX IF NOT EXISTS board_listings_status ON board_listings(status, hidde
 opportunities.migrate(db);
 verification.migrate(db);
 access.migrate(db);
+qr.migrate(db);
 const opportunityRuns = opportunities.createRunner({ db, log: (...parts) => console.log(...parts) });
 if (process.env.OPPORTUNITIES_SCHEDULER !== '0') opportunityRuns.schedule();
 const verificationChecks = verification.createChecker({
@@ -993,6 +995,40 @@ app.get('/api/admin/opportunities', requireAdmin, (req, res) => {
   }
   res.json(data);
 });
+app.get('/api/admin/qr', requireAdmin, (req, res) => {
+  res.json({ links: qr.listLinks(db) });
+});
+app.post('/api/admin/qr', requireAdmin, (req, res) => {
+  const result = qr.createLink(db, req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json(result);
+});
+app.post('/api/admin/qr/:code', requireAdmin, (req, res) => {
+  const result = qr.updateLink(db, req.params.code, req.body || {});
+  if (result.error) return res.status(result.error === 'Link not found' ? 404 : 400).json({ error: result.error });
+  res.json(result);
+});
+app.get('/api/admin/qr/scans.csv', requireAdmin, (req, res) => {
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename="qr-scans.csv"');
+  res.send(qr.scansCsv(qr.scanRows(db)));
+});
+app.get('/api/admin/qr/:code/code.png', requireAdmin, async (req, res) => {
+  const row = db.prepare('SELECT code FROM qr_links WHERE code=?').get(String(req.params.code || '').toLowerCase());
+  if (!row) return res.status(404).json({ error: 'Link not found' });
+  const png = await qr.qrPng(row.code);
+  res.set('Content-Type', 'image/png');
+  res.set('Content-Disposition', `attachment; filename="qr-${row.code}.png"`);
+  res.send(png);
+});
+app.get('/api/admin/qr/:code/code.svg', requireAdmin, async (req, res) => {
+  const row = db.prepare('SELECT code FROM qr_links WHERE code=?').get(String(req.params.code || '').toLowerCase());
+  if (!row) return res.status(404).json({ error: 'Link not found' });
+  const svg = await qr.qrSvg(row.code);
+  res.set('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="qr-${row.code}.svg"`);
+  res.send(svg);
+});
 app.get('/api/admin/access', requireAdmin, (req, res) => {
   const data = access.report(db, { week: req.query.week || 'current' });
   if (data.error) return res.status(400).json({ error: data.error });
@@ -1102,6 +1138,25 @@ app.get('/', (req, res) => { const u = auth(req); if (!u) return res.redirect('/
 app.get('/login', page('login.html'));
 app.get('/me', (req, res) => auth(req) ? page('agent.html')(req, res) : res.redirect('/login'));
 app.get('/admin', (req, res) => { const u = auth(req); if (!u) return res.redirect('/login'); if (u.role !== 'admin') return res.redirect('/me'); page('admin.html')(req, res); });
+app.get('/q/:code', (req, res) => {
+  const code = String(req.params.code || '').toLowerCase();
+  const link = /^[a-z0-9]{4,12}$/.test(code)
+    ? db.prepare('SELECT * FROM qr_links WHERE code=?').get(code)
+    : null;
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.type('html');
+  if (!link || !link.active) return res.send(qr.inactivePage());
+  try { qr.recordScan(db, link, req); } catch (err) { /* still offer the text if the log cannot be written */ }
+  res.send(qr.scanPage(link, req.get('user-agent')));
+});
+app.get('/qr', (req, res) => {
+  const u = auth(req);
+  if (!u) return res.redirect('/login?next=' + encodeURIComponent('/qr'));
+  if (u.role !== 'admin') return res.redirect('/me');
+  res.set('Cache-Control', 'no-store');
+  return page('qr.html')(req, res);
+});
 app.get('/access', (req, res) => {
   const u = auth(req);
   if (!u) return res.redirect('/login?next=' + encodeURIComponent('/access'));

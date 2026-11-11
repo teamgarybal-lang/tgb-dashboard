@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Letter QR · Harcourts TGB Group</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<header class="top"><img src="/static/logo.png" alt="Harcourts TGB Group"><div class="who"><b>Letter QR</b><br><a href="/admin">Team numbers</a> · <a href="/access">Access</a> · <a href="#" onclick="logout();return false">Sign out</a></div></header>
+<div class="wrap wide">
+ <div class="card">
+  <div class="row" style="justify-content:space-between">
+   <h2 style="margin:0">Appraisal letter links</h2>
+   <a class="btn sec" href="/api/admin/qr/scans.csv">Scan CSV</a>
+  </div>
+  <p class="muted">Each printed QR opens a short link, counts the scan, then offers a text to the agent. Scans are counted. People are identified only when they send the text. The phone's address is not stored.</p>
+  <div class="scroll"><table id="links"></table></div>
+ </div>
+ <div class="card">
+  <h2>New link</h2>
+  <div class="grid2">
+   <div><label for="label">Label</label><input id="label" placeholder="Gary &amp; Jovana appraisal letter"></div>
+   <div><label for="campaign">Campaign</label><input id="campaign" placeholder="appraisal-letters"></div>
+   <div><label for="suburb">Suburb</label><input id="suburb" placeholder="Optional"></div>
+   <div><label for="agent">Agent name</label><input id="agent" placeholder="Jovana Giudici"></div>
+   <div><label for="mobile">Agent mobile</label><input id="mobile" placeholder="+64226393317" inputmode="tel"></div>
+   <div><label for="active">Active</label><select id="active"><option value="1">Yes</option><option value="0">No</option></select></div>
+  </div>
+  <label for="body">Text message</label>
+  <textarea id="body" rows="5">Hi Jovana, I'd like a free appraisal of my property.
+Name: 
+Property address: 
+Email: </textarea>
+  <button style="margin-top:12px" onclick="createLink()">Create link</button>
+  <div class="err" id="err"></div>
+  <div class="okmsg" id="ok"></div>
+ </div>
+</div>
+<script src="/static/common.js"></script>
+<script>
+const when=iso=>{if(!iso)return '—';const d=new Date(iso);if(Number.isNaN(d.getTime()))return '—';return d.toLocaleString('en-NZ',{timeZone:'Pacific/Auckland',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})};
+function days(list){return (list||[]).slice(-7).map(d=>{const p=d.day.split('-');const label=new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).toLocaleDateString('en-NZ',{timeZone:'Pacific/Auckland',day:'numeric',month:'short'});return label+': '+d.scans}).join(' · ')||'No scans yet'}
+async function load(){const d=await api('/api/admin/qr');
+ $('#links').innerHTML=d.links.length?'<tr><th>Letter</th><th class="n">Scans</th><th class="n">Unique</th><th>Last scan</th><th>Per day</th><th></th></tr>'+d.links.map(l=>`<tr>
+  <td><b>${esc(l.label)}</b><div class="muted">${esc(l.agent_name)} · ${esc(l.agent_mobile)}${l.suburb?' · '+esc(l.suburb):''}${l.active?'':' · inactive'}</div><div class="muted">${esc(l.url)}</div></td>
+  <td class="n">${l.scans}</td><td class="n">${l.unique_scans}</td><td>${esc(when(l.last_scan))}</td><td class="muted">${esc(days(l.days))}</td>
+  <td><a href="/api/admin/qr/${esc(l.code)}/code.png">PNG</a> · <a href="/api/admin/qr/${esc(l.code)}/code.svg">SVG</a><br><button class="sec small" onclick="toggleActive('${esc(l.code)}',${l.active?0:1})">${l.active?'Pause':'Activate'}</button></td>
+ </tr>`).join(''):'<tr><td class="muted">No links yet</td></tr>'}
+async function createLink(){$('#err').textContent='';$('#ok').textContent='';
+ try{const res=await api('/api/admin/qr',{body:{label:$('#label').value,campaign:$('#campaign').value,suburb:$('#suburb').value,agent_name:$('#agent').value,agent_mobile:$('#mobile').value,sms_body:$('#body').value,active:$('#active').value==='1'}});
+  $('#ok').textContent='Created '+res.link.url;await load()}catch(e){$('#err').textContent=e.message}}
+async function toggleActive(code,active){try{await api('/api/admin/qr/'+code,{body:{active:!!active}});await load()}catch(e){alert(e.message)}}
+load();
+</script></body></html>
