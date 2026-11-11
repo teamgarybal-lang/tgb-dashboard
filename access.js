@@ -83,16 +83,25 @@ function normalPath(path) {
   return value;
 }
 
+function recordBeforeSend(res, accept, write) {
+  const end = res.end;
+  let written = false;
+  res.end = function (...args) {
+    if (!written && accept(res.statusCode)) {
+      written = true;
+      try { write(); } catch (err) { /* a tracking failure must not block the response */ }
+    }
+    return end.apply(this, args);
+  };
+}
+
 function observeRequest(db, req, res, auth) {
   const method = req.method;
   const path = normalPath(req.path);
   if (method === 'GET' && PAGE_VISITS.has(path)) {
-    res.on('finish', () => {
-      if (res.statusCode !== 200) return;
-      try {
-        const user = auth(req);
-        if (user) record(db, user.id, 'visit', 'page');
-      } catch (err) { /* ignore */ }
+    recordBeforeSend(res, status => status === 200, () => {
+      const user = auth(req);
+      if (user) record(db, user.id, 'visit', 'page');
     });
     return;
   }
@@ -103,12 +112,9 @@ function observeRequest(db, req, res, auth) {
     || path.startsWith('/api/board')
     || path.startsWith('/api/admin/');
   if (!humanAction) return;
-  res.on('finish', () => {
-    if (res.statusCode < 200 || res.statusCode >= 300) return;
-    try {
-      const user = auth(req);
-      if (user) record(db, user.id, 'visit', 'action');
-    } catch (err) { /* ignore */ }
+  recordBeforeSend(res, status => status >= 200 && status < 300, () => {
+    const user = auth(req);
+    if (user) record(db, user.id, 'visit', 'action');
   });
 }
 
