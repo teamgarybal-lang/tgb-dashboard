@@ -432,8 +432,43 @@ function auth(req) {
   if (!u || !u.active) return null;
   return u;
 }
+// Scheduled jobs. A missing or blank ADMIN_API_KEY turns this off. "" is never a key.
+const MACHINE_ADMIN = Object.freeze({
+  id: 0, name: 'API key', email: 'api-key', role: 'admin', active: 1, must_change: 0,
+});
+function configuredAdminKey() {
+  const value = process.env.ADMIN_API_KEY;
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+function bearerToken(header) {
+  if (typeof header !== 'string') return '';
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match ? match[1].trim() : '';
+}
+function sameSecret(expected, presented) {
+  const a = crypto.createHash('sha256').update(expected, 'utf8').digest();
+  const b = crypto.createHash('sha256').update(presented, 'utf8').digest();
+  return crypto.timingSafeEqual(a, b);
+}
+function requestHasAdminKey(req) {
+  const expected = configuredAdminKey();
+  if (!expected) return false;
+  const presented = [];
+  const headerKey = req.get('x-admin-key');
+  if (typeof headerKey === 'string' && headerKey.trim()) presented.push(headerKey.trim());
+  const bearer = bearerToken(req.get('authorization'));
+  if (bearer) presented.push(bearer);
+  return presented.some(value => sameSecret(expected, value));
+}
 const requireUser = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); req.user = u; next(); };
-const requireAdmin = (req, res, next) => { const u = auth(req); if (!u) return res.status(401).json({ error: 'Not signed in' }); if (u.role !== 'admin') return res.status(403).json({ error: 'Admin only' }); req.user = u; next(); };
+const requireAdmin = (req, res, next) => {
+  const u = auth(req);
+  if (u && u.role === 'admin') { req.user = u; return next(); }
+  if (requestHasAdminKey(req)) { req.user = MACHINE_ADMIN; return next(); }
+  if (!u) return res.status(401).json({ error: 'Not signed in' });
+  return res.status(403).json({ error: 'Admin only' });
+};
 app.use((req, res, next) => {
   try { access.observeRequest(db, req, res, auth); } catch (err) { /* a tracking failure must not block the dashboard */ }
   next();
@@ -1040,6 +1075,11 @@ app.get('/api/admin/access.csv', requireAdmin, (req, res) => {
   res.set('Content-Type', 'text/csv; charset=utf-8');
   res.set('Content-Disposition', 'attachment; filename="access.csv"');
   res.send(access.reportCsv(data));
+});
+app.get('/api/admin/access/logins', requireAdmin, (req, res) => {
+  const data = access.rangeReport(db, { from: req.query.from, to: req.query.to });
+  if (data.error) return res.status(400).json({ error: data.error });
+  res.json(data);
 });
 app.get('/api/admin/opportunities/verification/status', requireAdmin, (req, res) => {
   const body = verificationChecks.status();
