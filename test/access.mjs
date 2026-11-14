@@ -76,6 +76,70 @@ test('Auckland week boundaries and unknown history before tracking', () => {
   assert.equal(previous.counts.not_observed_since_start, 0);
 });
 
+test('date-range login report counts sign-ins and phone visits inside the range', () => {
+  const db = memoryDb();
+  db.prepare('UPDATE settings SET value=? WHERE key=?').run('2026-11-11T00:00:00.000Z', access.TRACKING_KEY);
+  const pat = addUser(db, 'Pat Agent', 'agent');
+  addUser(db, 'Quiet Agent', 'agent');
+  const gone = addUser(db, 'Gone Agent', 'agent', 0);
+  addUser(db, 'Ada Admin', 'admin');
+  // Tue 10 Nov 23:30 Auckland is still before tracking. Wed 11 Nov 14:00 Auckland is inside.
+  access.record(db, pat, 'sign_in', 'login', new Date('2026-11-10T10:30:00.000Z'));
+  access.record(db, pat, 'sign_in', 'login', new Date('2026-11-11T01:00:00.000Z'));
+  access.record(db, pat, 'visit', 'page', new Date('2026-11-11T01:05:00.000Z'));
+  access.record(db, pat, 'visit', 'page', new Date('2026-11-12T02:00:00.000Z'));
+  access.record(db, gone, 'sign_in', 'login', new Date('2026-11-11T03:00:00.000Z'));
+
+  const missing = access.rangeReport(db, { from: '2026-11-09' });
+  assert.equal(missing.error, 'from and to must be YYYY-MM-DD dates');
+  assert.equal(access.rangeReport(db, { from: '2026-02-31', to: '2026-03-01' }).error, 'from and to must be YYYY-MM-DD dates');
+  assert.equal(access.rangeReport(db, { from: '2026-11-12', to: '2026-11-11' }).error, 'from must be on or before to');
+
+  const week = access.rangeReport(db, { from: '2026-11-09', to: '2026-11-15' });
+  assert.equal(week.coverage, 'partial');
+  assert.equal(week.observed_from, '2026-11-11');
+  assert.equal(week.observed_to, '2026-11-15');
+  assert.equal(week.timezone, 'Pacific/Auckland');
+  assert.equal(week.agents.some(person => person.name === 'Ada Admin'), false);
+  const patRow = week.agents.find(person => person.id === pat);
+  assert.equal(patRow.logged_in, true);
+  assert.equal(patRow.visited, true);
+  assert.equal(patRow.seen, true);
+  assert.equal(patRow.active, true);
+  assert.equal(patRow.last_login, '2026-11-11T01:00:00.000Z');
+  assert.equal(patRow.last_visit, '2026-11-12T02:00:00.000Z');
+  assert.equal(patRow.last_seen, '2026-11-12T02:00:00.000Z');
+  const quiet = week.agents.find(person => person.name === 'Quiet Agent');
+  assert.equal(quiet.logged_in, false);
+  assert.equal(quiet.visited, false);
+  assert.equal(quiet.seen, false);
+  assert.equal(quiet.last_login, null);
+  assert.equal(quiet.last_visit, null);
+  assert.equal(quiet.last_seen, null);
+  const goneRow = week.agents.find(person => person.id === gone);
+  assert.equal(goneRow.active, false);
+  assert.equal(goneRow.logged_in, true);
+  assert.equal(goneRow.visited, false);
+  assert.equal(goneRow.last_seen, goneRow.last_login);
+
+  const phoneOnly = access.rangeReport(db, { from: '2026-11-12', to: '2026-11-12' });
+  assert.equal(phoneOnly.coverage, 'complete');
+  const phone = phoneOnly.agents.find(person => person.id === pat);
+  assert.equal(phone.logged_in, false);
+  assert.equal(phone.visited, true);
+  assert.equal(phone.seen, true);
+  assert.equal(phone.last_login, null);
+  assert.equal(phone.last_visit, '2026-11-12T02:00:00.000Z');
+  assert.equal(phone.last_seen, phone.last_visit);
+
+  const before = access.rangeReport(db, { from: '2026-11-02', to: '2026-11-08' });
+  assert.equal(before.coverage, 'unknown');
+  assert.equal(before.observed_from, null);
+  assert.equal(before.agents.every(person => person.logged_in === false && person.visited === false && person.seen === false), true);
+  assert.equal(before.agents.every(person => person.last_login === null && person.last_visit === null && person.last_seen === null), true);
+  assert.match(before.note, /before access tracking began/);
+});
+
 function launch(data, port) {
   let logs = '';
   const server = spawn(process.execPath, ['server.js'], {

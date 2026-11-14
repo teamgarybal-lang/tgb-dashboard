@@ -256,6 +256,89 @@ function report(db, options = {}) {
   };
 }
 
+function validDay(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return value;
+}
+
+function laterIso(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+function rangeReport(db, options = {}) {
+  const from = validDay(options.from);
+  const to = validDay(options.to);
+  if (!from || !to) return { error: 'from and to must be YYYY-MM-DD dates' };
+  if (from > to) return { error: 'from must be on or before to' };
+  const started = collectionStart(db);
+  if (!started) return { error: 'Access tracking has not started' };
+  const startDay = aucklandDate(new Date(started));
+  let coverage = 'complete';
+  if (startDay > to) coverage = 'unknown';
+  else if (startDay > from) coverage = 'partial';
+  const observedFrom = coverage === 'unknown' ? null : (startDay > from ? startDay : from);
+  const observedTo = coverage === 'unknown' ? null : to;
+  const users = db.prepare("SELECT id, name, email, active FROM users WHERE role='agent' ORDER BY name").all();
+  const events = coverage === 'unknown'
+    ? []
+    : db.prepare('SELECT user_id, event_type, occurred_at FROM access_events WHERE occurred_at>=?').all(started);
+  const byUser = new Map();
+  for (const event of events) {
+    if (!inRange(event.occurred_at, observedFrom, observedTo)) continue;
+    if (!byUser.has(event.user_id)) byUser.set(event.user_id, []);
+    byUser.get(event.user_id).push(event);
+  }
+  const agents = users.map(user => {
+    const person = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      active: !!user.active,
+      logged_in: false,
+      visited: false,
+      seen: false,
+      last_login: null,
+      last_visit: null,
+      last_seen: null,
+    };
+    for (const event of byUser.get(user.id) || []) {
+      if (event.event_type === 'sign_in' && (!person.last_login || event.occurred_at > person.last_login)) {
+        person.last_login = event.occurred_at;
+      }
+      if (event.event_type === 'visit' && (!person.last_visit || event.occurred_at > person.last_visit)) {
+        person.last_visit = event.occurred_at;
+      }
+    }
+    person.logged_in = !!person.last_login;
+    person.visited = !!person.last_visit;
+    person.last_seen = laterIso(person.last_login, person.last_visit);
+    person.seen = !!person.last_seen;
+    return person;
+  });
+  const note = coverage === 'unknown'
+    ? 'This range ended before access tracking began. There is no sign-in or visit record for it. logged_in and visited are false because those days were not recorded.'
+    : coverage === 'partial'
+      ? `Tracking began ${startDay} (Auckland). Earlier days in this range were not recorded. logged_in is a successful sign-in. visited is a phone page open or another deliberate save. Timed refreshes are not visits.`
+      : 'logged_in is a successful sign-in in this range. visited is a phone page open or another deliberate save in this range. Timed refreshes are not visits. seen is true when either happened. last_login, last_visit, and last_seen are the latest matching timestamps, or null.';
+  return {
+    timezone: TZ,
+    from,
+    to,
+    collection_start: started,
+    collection_start_auckland: startDay,
+    observed_from: observedFrom,
+    observed_to: observedTo,
+    coverage,
+    note,
+    agents,
+  };
+}
+
 function csvCell(value) {
   let text = value == null ? '' : String(value);
   if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
@@ -284,5 +367,6 @@ module.exports = {
   observeRequest,
   weekWindow,
   report,
+  rangeReport,
   reportCsv,
 };
